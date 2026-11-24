@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")  # load OPENROUTER_API_KEY and LANG_RESUME
 MODEL = os.environ.get("MODEL", "nvidia/nemotron-3.5-lightning:free")
-LANG = os.environ.get("LANG_RESUME", "français")  # language of the Résumé; Mots-clés stay in their original form
+LANG = os.environ.get("LANG_RESUME", "English")  # language of the Résumé; Mots-clés stay in their original form
 MAX_CHARS = 100_000  # shortcut: hard truncation of Texte intégral, upgrade if long transcripts lose their end
 
 PROMPT = """You write the summary card of a saved web resource for a personal tech watch (veille) database.
