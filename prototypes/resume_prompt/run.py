@@ -14,7 +14,9 @@ Results go to prototypes/resume_prompt/out/<timestamp>.md. One LLM request per S
 import html, json, os, re, sys, time, urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
+from dotenv import load_dotenv
 
+load_dotenv(Path(__file__).parent.parent / ".env")  # load OPENROUTER_API_KEY and LANG_RESUME
 MODEL = os.environ.get("MODEL", "nvidia/nemotron-3.5-lightning:free")
 LANG = os.environ.get("LANG_RESUME", "français")  # language of the Résumé; Mots-clés stay in their original form
 MAX_CHARS = 100_000  # shortcut: hard truncation of Texte intégral, upgrade if long transcripts lose their end
@@ -31,25 +33,26 @@ Full text (may be truncated):
 {text}
 >>>
 
-Answer in {lang}, using EXACTLY this format and nothing else (no preamble, no closing remark):
+Write the content in {lang}, but keep the five headings below exactly as written, in English.
+Use EXACTLY this format and nothing else (no preamble, no closing remark):
 
-## De quoi ça parle
+## What it is
 <2-3 sentences: what the resource is and what it does/claims, concretely.>
 
-## Pourquoi c'est intéressant
+## Why it matters
 <1-2 sentences: what is new, notable, or useful compared to the usual. No hype words.>
 
-## Points clés
+## Key points
 - <3 to 6 bullets: concrete facts, numbers, techniques, limitations>
 
-## Pour qui
+## Who it's for
 <1 sentence: who should reopen this, and for what need.>
 
-## Mots-clés
+## Keywords
 <8 to 15 comma-separated keywords. Mostly proper nouns as written in the source (tools, models, libraries, companies, authors, datasets, benchmarks), plus a few topic terms. No generic words like "AI" or "tool".>
 """
 
-SECTIONS = ["De quoi ça parle", "Pourquoi c'est intéressant", "Points clés", "Pour qui", "Mots-clés"]
+SECTIONS = ["What it is", "Why it matters", "Key points", "Who it's for", "Keywords"]
 
 
 def get(url, accept=None):
@@ -103,7 +106,7 @@ def parse(out):
         head, _, body = chunk.partition("\n")
         found[head.strip()] = body.strip()
     res = {s: found.get(s) for s in SECTIONS}
-    res["Mots-clés"] = [k.strip() for k in res["Mots-clés"].split(",") if k.strip()] if res["Mots-clés"] else None
+    res["Keywords"] = [k.strip() for k in res["Keywords"].split(",") if k.strip()] if res["Keywords"] else None
     return res
 
 
@@ -127,8 +130,8 @@ def main():
         status = f"OK" if not missing else f"SECTIONS MANQUANTES : {missing}"
         info = f"{site} · {len(text)} car. (tronqué)" if len(text) > MAX_CHARS else f"{site} · {len(text)} car."
         block = f"## {title}\n\n{url} · {info} · {secs:.1f}s · tokens {usage.get('prompt_tokens')}/{usage.get('completion_tokens')} · {status}\n\n{out.strip()}\n"
-        if res["Mots-clés"]:
-            block += f"\n_Mots-clés parsés ({len(res['Mots-clés'])}) :_ {res['Mots-clés']}\n"
+        if res["Keywords"]:
+            block += f"\n_Mots-clés parsés ({len(res['Keywords'])}) :_ {res['Keywords']}\n"
         print(block)
         report.append(block)
     f = out_dir / f"{time.strftime('%Y%m%d-%H%M%S')}.md"
