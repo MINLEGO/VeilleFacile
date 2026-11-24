@@ -29,3 +29,7 @@ _Code_: `capture`
 
 **Récupération par URL**: le fait de n'envoyer que l'URL d'une Source et de laisser le service aller chercher le Texte intégral. Elle est limitée à GitHub et Hugging Face.
 _Code_: `fetch`
+
+**Jeu de référence**: un ensemble de requêtes réelles de l'utilisateur, chacune associée aux Sources qu'elle doit retrouver. Il sert à juger la qualité de la recherche.
+_Code_: `eval/queries.yaml`
+_Avoid_: benchmark, jeu de test
