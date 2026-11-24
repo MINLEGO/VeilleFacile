@@ -1,0 +1,347 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throwaway. Ticket "Stack et rendu de l'UI web minimale" (MINLEGO/VeilleFacile#11).
+  Three variants of the VeilleFacile UI, switchable via ?variant=A|B|C (bottom bar or ← →).
+  Stack being tested: one static HTML page + vanilla JS, no build, served by FastAPI, talking only to the REST API.
+  The API here is an in-memory MOCK that follows the contract of ticket #8 (no backend exists yet). Reload = reset.
+-->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VeilleFacile — prototype UI</title>
+<style>
+  :root { --bg:#f7f7f5; --fg:#1d1d1f; --muted:#6b6b70; --line:#e2e2df; --acc:#2f5bd3; --chip:#eef1fb; --danger:#c0392b; --card:#fff; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; background:var(--bg); color:var(--fg); }
+  button, input, select, textarea { font:inherit; }
+  button { cursor:pointer; border:1px solid var(--line); background:#fff; border-radius:6px; padding:5px 10px; }
+  button.primary { background:var(--acc); color:#fff; border-color:var(--acc); }
+  button.danger { color:var(--danger); }
+  input, select, textarea { border:1px solid var(--line); border-radius:6px; padding:6px 8px; background:#fff; }
+  .muted { color:var(--muted); font-size:12px; }
+  .chip { display:inline-flex; gap:4px; align-items:center; background:var(--chip); border-radius:999px; padding:1px 8px; margin:2px; font-size:12px; }
+  .chip.manual { background:#e6f4ea; }
+  .chip.rejected { background:#f4e6e6; text-decoration:line-through; color:var(--muted); }
+  .chip button { border:0; background:none; padding:0 2px; color:var(--muted); }
+  .summary h4 { margin:10px 0 2px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  .summary p, .summary ul { margin:2px 0; }
+  .summary ul { padding-left:18px; }
+  .err { color:var(--danger); }
+  .fulltext { white-space:pre-wrap; font:12px/1.5 ui-monospace, Consolas, monospace; background:#fff; border:1px solid var(--line); border-radius:6px; padding:10px; max-height:320px; overflow:auto; }
+  #switcher { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#111; color:#fff; border-radius:999px; padding:6px 10px; display:flex; gap:10px; align-items:center; box-shadow:0 6px 20px rgba(0,0,0,.3); z-index:99; font-size:13px; }
+  #switcher button { background:none; color:#fff; border:0; font-size:16px; }
+  #keybar { position:fixed; bottom:16px; left:12px; z-index:50; }
+  /* Variant A */
+  .A { max-width:760px; margin:40px auto 80px; padding:0 16px; }
+  .A .hero input { width:100%; font-size:18px; padding:12px 14px; border-radius:10px; }
+  .A .filters { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 18px; align-items:center; }
+  .A .res { padding:14px 0; border-bottom:1px solid var(--line); }
+  .A .res .t { font-size:16px; color:var(--acc); cursor:pointer; font-weight:600; }
+  .A .res .open { margin-top:8px; padding:12px; background:var(--card); border:1px solid var(--line); border-radius:8px; }
+  /* Variant B */
+  .B { display:grid; grid-template-columns:230px 380px 1fr; height:100vh; }
+  .B > div { overflow:auto; border-right:1px solid var(--line); padding:14px; }
+  .B .side label { display:block; margin:10px 0 3px; font-size:12px; color:var(--muted); }
+  .B .side input, .B .side select { width:100%; }
+  .B .item { padding:10px; border-radius:8px; cursor:pointer; margin-bottom:4px; }
+  .B .item:hover { background:#eeeeea; }
+  .B .item.sel { background:var(--chip); }
+  .B .detail { background:var(--card); }
+  .B .tabs button.on { background:var(--fg); color:#fff; }
+  /* Variant C */
+  .C { padding:14px 18px 80px; }
+  .C .bar { display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+  .C table { width:100%; border-collapse:collapse; background:#fff; font-size:13px; }
+  .C th { text-align:left; font-size:11px; text-transform:uppercase; color:var(--muted); border-bottom:2px solid var(--line); padding:6px 8px; cursor:pointer; }
+  .C td { border-bottom:1px solid var(--line); padding:6px 8px; vertical-align:top; }
+  .C tr:hover td { background:#fafaf8; }
+  .C .oneline { max-width:420px; color:var(--muted); }
+  dialog { border:1px solid var(--line); border-radius:10px; width:min(760px, 92vw); padding:18px; }
+  dialog::backdrop { background:rgba(0,0,0,.3); }
+</style>
+</head>
+<body>
+<div id="keybar"></div>
+<div id="app"></div>
+<div id="switcher"><button id="prev">←</button><span id="vlabel"></span><button id="next">→</button></div>
+<script>
+// ---------- MOCK API (contract of ticket #8; in memory, reset on reload) ----------
+const lc = s => s.toLowerCase();
+const now = () => new Date().toISOString();
+const md = (t, i, w, p, k) => `## What it is\n${t}\n\n## Why it matters\n${i}\n\n## Key points\n${p.map(x => '- ' + x).join('\n')}\n\n## Who it's for\n${w}\n\n## Keywords\n${k}`;
+let nextId = 1;
+const DB = [
+  ["https://github.com/astral-sh/uv", "astral-sh/uv", "github.com", "fetch", "2026-11-10",
+   md("uv is a Python package and project manager written in Rust, replacing pip, pip-tools, pipx, poetry, pyenv and virtualenv.", "It is 10-100x faster than pip and unifies the whole Python toolchain in one binary.", "Python developers tired of juggling several packaging tools.", ["Resolver and installer written in Rust", "Manages Python versions and virtual environments", "Lockfile with cross-platform resolution", "Drop-in pip interface (uv pip)"], ""),
+   ["uv", "Astral", "Rust", "pip", "Poetry", "pyenv", "lockfile", "Python packaging"], ["Ruff"], []],
+  ["https://huggingface.co/Qwen/Qwen3-8B", "Qwen/Qwen3-8B", "huggingface.co", "fetch", "2025-05-02",
+   md("Qwen3-8B is an 8B-parameter open-weight causal language model from Alibaba's Qwen team with switchable thinking and non-thinking modes.", "A single model handles both step-by-step reasoning and fast chat, with a 32k native context extendable to 131k via YaRN.", "Developers choosing a mid-size open model for local inference or fine-tuning.", ["8.2B parameters, 36 layers, GQA", "Thinking mode toggled by enable_thinking", "Context 32,768 tokens, 131,072 with YaRN", "Apache 2.0 license"], ""),
+   ["Qwen3", "Alibaba", "YaRN", "Transformers", "vLLM", "SGLang", "GQA", "reasoning"], [], ["Transformers"]],
+  ["https://simonwillison.net/2024/Dec/31/llms-in-2024/", "Things we learned about LLMs in 2024", "simonwillison.net", "capture", "2024-12-31",
+   md("A year-in-review essay on the LLM landscape in 2024: model competition, falling prices, multimodality and agents.", "Dense, sourced overview by a practitioner; useful to recall what changed and when.", "Anyone needing a reference timeline of the 2024 LLM ecosystem.", ["GPT-4 barrier broken by 18 organisations", "Price per token collapsed during the year", "Inference-scaling models (o1) appeared", "'Agents' still poorly defined"], ""),
+   ["Simon Willison", "GPT-4", "o1", "Gemini", "Claude", "Llama", "inference scaling", "LLM pricing"], [], []],
+  ["https://www.youtube.com/watch?v=zjkBMFhNj_g", "Intro to Large Language Models", "youtube.com", "capture", "2023-11-22",
+   md("A one-hour talk by Andrej Karpathy introducing how LLMs are trained and used, and the emerging LLM 'operating system' view.", "Clear mental model of pretraining vs fine-tuning, plus a security section on jailbreaks and prompt injection.", "Engineers wanting a solid conceptual grounding before building on LLMs.", ["Pretraining as lossy compression of the internet", "Fine-tuning into assistants with RLHF", "Scaling laws and tool use", "Jailbreaks, prompt injection, data poisoning"], ""),
+   ["Andrej Karpathy", "Llama 2", "RLHF", "scaling laws", "prompt injection", "jailbreak", "LLM OS"], [], []],
+  ["https://github.com/pgvector/pgvector", "pgvector/pgvector", "github.com", "fetch", "2026-09-18",
+   md("pgvector is a Postgres extension for vector similarity search, supporting exact and approximate nearest-neighbour search.", "It lets you keep embeddings next to relational data and combine vector search with SQL filters and full-text search.", "Teams who want vector search without adding a dedicated vector database.", ["HNSW and IVFFlat indexes", "L2, inner product, cosine, L1 distances", "vector up to 16,000 dims stored, 2,000 indexed", "halfvec and sparsevec types"], ""),
+   ["pgvector", "PostgreSQL", "HNSW", "IVFFlat", "halfvec", "vector search", "embeddings"], [], []],
+  ["https://huggingface.co/datasets/HuggingFaceFW/fineweb", "HuggingFaceFW/fineweb", "huggingface.co", "fetch", "2024-06-01",
+   md("FineWeb is a 15-trillion-token English web dataset built from CommonCrawl with documented filtering and deduplication.", "Its ablations show which filtering steps actually improve model quality, and the pipeline is open.", "People pretraining LLMs or studying data quality.", ["15T tokens from 96 CommonCrawl dumps", "Built with the datatrove library", "FineWeb-Edu subset filtered by an educational classifier", "ODC-By license"], ""),
+   ["FineWeb", "FineWeb-Edu", "CommonCrawl", "datatrove", "Hugging Face", "pretraining data", "deduplication"], [], []],
+].map(([url, title, origin_site, ingest_mode, pub, summary, gen, man, rej]) => ({
+  id: nextId++, url, canonical_url: url.replace("www.", ""), origin_site, title, summary,
+  generated_keywords: gen, manual_keywords: man, rejected_keywords: rej, ingest_mode,
+  full_text: `(Texte intégral simulé de « ${title} ».)\n\n` + (summary + "\n\n").repeat(30),
+  published_at: pub + "T00:00:00Z", created_at: "2026-11-20T10:00:00Z", updated_at: "2026-11-2" + (nextId % 4) + "T10:00:00Z",
+  embedding_model: "nvidia/nemotron-3.5-embed-8b:free@4096",
+}));
+
+function keywords(s) {
+  const rej = new Set(s.rejected_keywords.map(lc)), seen = new Set(), out = [];
+  for (const k of [...s.generated_keywords.filter(k => !rej.has(lc(k))), ...s.manual_keywords])
+    if (!seen.has(lc(k))) { seen.add(lc(k)); out.push(k); }
+  return out;
+}
+const pub = s => { const { full_text, generated_keywords, manual_keywords, rejected_keywords, ...r } = s; return { ...r, keywords: keywords(s) }; };
+const wait = ms => new Promise(r => setTimeout(r, ms));
+class ApiError extends Error { constructor(status, detail) { super(detail); this.status = status; } }
+
+const api = {
+  async search({ q = "", site = "", kw = [], mode = "hybrid", limit = 20, offset = 0 } = {}) {
+    await wait(120);
+    let rows = DB.filter(s => (!site || s.origin_site === site) && kw.every(k => keywords(s).map(lc).includes(lc(k))));
+    if (q) {
+      const terms = lc(q).split(/\s+/).filter(Boolean);
+      rows = rows.map(s => {
+        const hay = lc([s.title, s.summary, ...keywords(s)].join(" "));
+        const score = terms.reduce((a, t) => a + (hay.includes(t) ? 1 : 0), 0) / terms.length + (mode === "text" ? 0 : Math.random() * 0.15);
+        return { s, score };
+      }).filter(r => r.score > (mode === "semantic" ? 0.05 : 0.3)).sort((a, b) => b.score - a.score)
+        .map(r => ({ ...pub(r.s), score: +r.score.toFixed(3) }));
+    } else rows = rows.slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map(pub);
+    return { total: rows.length, items: rows.slice(offset, offset + limit) };
+  },
+  async get(id) { const s = DB.find(s => s.id === id); if (!s) throw new ApiError(404, "Not found");
+    return { ...pub(s), generated_keywords: s.generated_keywords, manual_keywords: s.manual_keywords, rejected_keywords: s.rejected_keywords, text_length: s.full_text.length }; },
+  async text(id, start = 0, length = 50000) { const s = DB.find(s => s.id === id); return { text: s.full_text.slice(start, start + length), start, total_length: s.full_text.length }; },
+  async add({ url }) {
+    let u; try { u = new URL(url); } catch { throw new ApiError(422, "URL invalide"); }
+    const host = u.hostname.replace("www.", "");
+    if (!["github.com", "huggingface.co"].includes(host)) throw new ApiError(422, "Capture requise : seuls GitHub et Hugging Face sont récupérables par URL");
+    await wait(2500); // simulates the synchronous fetch + LLM + embedding
+    const parts = u.pathname.split("/").filter(Boolean), title = parts.slice(0, 2).join("/");
+    const canon = `${host}/${title}`.toLowerCase(), ex = DB.find(s => s.canonical_url.toLowerCase().endsWith(canon));
+    if (ex) { ex.updated_at = now(); return { status: 200, source: pub(ex) }; }
+    const s = { id: nextId++, url, canonical_url: "https://" + canon, origin_site: host, title,
+      summary: md(`${title} (Résumé simulé par le prototype).`, "Simulated.", "Simulated.", ["Point one", "Point two", "Point three"], ""),
+      generated_keywords: [parts[1] || title, parts[0]], manual_keywords: [], rejected_keywords: [], ingest_mode: "fetch",
+      full_text: "(README simulé)", published_at: null, created_at: now(), updated_at: now(), embedding_model: "nvidia/nemotron-3.5-embed-8b:free@4096" };
+    DB.push(s); return { status: 201, source: pub(s) };
+  },
+  async patch(id, b) {
+    await wait(300);
+    const s = DB.find(s => s.id === id);
+    if (b.keywords && (b.add_keywords || b.remove_keywords)) throw new ApiError(422, "keywords exclusif avec add/remove_keywords");
+    const has = (arr, k) => arr.some(x => lc(x) === lc(k)), drop = (arr, k) => arr.filter(x => lc(x) !== lc(k));
+    if (b.title) s.title = b.title;
+    if (b.summary) s.summary = b.summary;
+    for (const k of b.add_keywords || []) { if (!has(s.manual_keywords, k)) s.manual_keywords.push(k); s.rejected_keywords = drop(s.rejected_keywords, k); }
+    for (const k of b.remove_keywords || []) { s.manual_keywords = drop(s.manual_keywords, k); if (!has(s.rejected_keywords, k)) s.rejected_keywords.push(k); }
+    if (b.keywords) { s.manual_keywords = [...b.keywords]; for (const g of s.generated_keywords) if (!has(b.keywords, g) && !has(s.rejected_keywords, g)) s.rejected_keywords.push(g); }
+    s.updated_at = now(); return api.get(id);
+  },
+  async del(id) { await wait(150); DB.splice(DB.findIndex(s => s.id === id), 1); },
+};
+
+// ---------- shared helpers ----------
+const h = (html) => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; };
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function renderSummary(m) {
+  return '<div class="summary">' + m.split(/^## /m).filter(Boolean).filter(c => !c.startsWith("Keywords")).map(c => {
+    const [head, ...rest] = c.trim().split("\n"); const body = rest.join("\n").trim();
+    const inner = body.startsWith("- ") ? "<ul>" + body.split("\n").map(l => `<li>${esc(l.slice(2))}</li>`).join("") + "</ul>" : `<p>${esc(body)}</p>`;
+    return `<h4>${esc(head)}</h4>${inner}`;
+  }).join("") + "</div>";
+}
+const firstLine = m => (m.match(/## What it is\n(.*)/) || [, ""])[1];
+const date = d => d ? d.slice(0, 10) : "—";
+const SITES = () => [...new Set(DB.map(s => s.origin_site))];
+
+// Keyword editor shared by all variants (the rules are the API's, the look is the variant's job)
+function keywordEditor(full, onChange) {
+  const el = h(`<div></div>`);
+  const draw = () => {
+    const eff = full.keywords.map(k => `<span class="chip ${full.manual_keywords.some(m => lc(m) === lc(k)) ? "manual" : ""}">${esc(k)}<button title="Retirer" data-rm="${esc(k)}">×</button></span>`).join("");
+    const rej = full.rejected_keywords.map(k => `<span class="chip rejected" title="Mot-clé rejeté">${esc(k)}</span>`).join("");
+    el.innerHTML = `${eff}${rej}<form style="display:inline"><input placeholder="+ mot-clé" size="12"></form>
+      <div class="muted">bleu = généré, vert = manuel, barré = rejeté</div>`;
+    el.querySelectorAll("[data-rm]").forEach(b => b.onclick = async () => { full = await api.patch(full.id, { remove_keywords: [b.dataset.rm] }); draw(); onChange?.(full); });
+    el.querySelector("form").onsubmit = async e => { e.preventDefault(); const v = e.target[0].value.trim(); if (!v) return;
+      full = await api.patch(full.id, { add_keywords: [v] }); draw(); onChange?.(full); };
+  };
+  draw(); return el;
+}
+
+function addUrlForm(onDone) {
+  const f = h(`<form style="display:inline-flex;gap:6px;align-items:center"><input placeholder="URL GitHub ou Hugging Face" size="34"><button class="primary">Ajouter</button><span class="msg muted"></span></form>`);
+  f.onsubmit = async e => {
+    e.preventDefault(); const msg = f.querySelector(".msg"), btn = f.querySelector("button");
+    btn.disabled = true; msg.className = "msg muted"; msg.textContent = "Récupération, Résumé, embedding…";
+    try { const r = await api.add({ url: f[0].value.trim() }); msg.textContent = r.status === 201 ? "Ajoutée." : "Déjà connue : mise à jour."; f[0].value = ""; onDone?.(r.source); }
+    catch (err) { msg.className = "msg err"; msg.textContent = `${err.status} — ${err.message}`; }
+    btn.disabled = false;
+  };
+  return f;
+}
+
+async function fullTextBlock(id) {
+  const t = await api.text(id, 0, 2000);
+  return `<div class="muted">${t.text.length} / ${t.total_length} caractères affichés</div><div class="fulltext">${esc(t.text)}</div>`;
+}
+
+async function confirmDelete(s) { if (!confirm(`Supprimer définitivement « ${s.title} » ?`)) return false; await api.del(s.id); return true; }
+
+// ---------- Variant A: search engine (one box, results list, expand in place) ----------
+const VariantA = { name: "Moteur de recherche", async render(app) {
+  app.innerHTML = `<div class="A"><div class="hero"><input id="q" placeholder="Rechercher dans la veille…" autofocus></div>
+    <div class="filters"><select id="site"><option value="">Tous les sites</option>${SITES().map(s => `<option>${s}</option>`).join("")}</select>
+    <select id="mode"><option value="hybrid">hybride</option><option value="semantic">sémantique</option><option value="text">texte</option></select>
+    <span style="flex:1"></span></div><div id="list"></div></div>`;
+  app.querySelector(".filters").append(addUrlForm(() => run()));
+  const run = async () => {
+    const r = await api.search({ q: app.querySelector("#q").value, site: app.querySelector("#site").value, mode: app.querySelector("#mode").value });
+    const list = app.querySelector("#list");
+    list.innerHTML = `<div class="muted">${r.total} Source(s)${app.querySelector("#q").value ? "" : " — les plus récentes"}</div>`;
+    for (const s of r.items) {
+      const row = h(`<div class="res"><div class="t">${esc(s.title)}</div>
+        <div class="muted">${s.origin_site} · publié ${date(s.published_at)} · <a href="${esc(s.url)}" target="_blank">ouvrir ↗</a>${s.score != null ? " · score " + s.score : ""}</div>
+        <div>${esc(firstLine(s.summary))}</div><div>${s.keywords.map(k => `<span class="chip">${esc(k)}</span>`).join("")}</div></div>`);
+      row.querySelector(".t").onclick = async () => {
+        const open = row.querySelector(".open"); if (open) return open.remove();
+        const full = await api.get(s.id);
+        const box = h(`<div class="open">${renderSummary(full.summary)}<h4 class="muted">MOTS-CLÉS</h4><div class="kw"></div>
+          <details><summary>Texte intégral (${full.text_length} car.)</summary><div class="ft">…</div></details>
+          <div style="margin-top:10px"><button class="danger">Supprimer</button></div></div>`);
+        box.querySelector(".kw").append(keywordEditor(full));
+        box.querySelector("details").ontoggle = async () => box.querySelector(".ft").innerHTML = await fullTextBlock(s.id);
+        box.querySelector(".danger").onclick = async () => { if (await confirmDelete(s)) run(); };
+        row.append(box);
+      };
+      list.append(row);
+    }
+  };
+  let t; app.querySelector("#q").oninput = () => { clearTimeout(t); t = setTimeout(run, 250); };
+  app.querySelector("#site").onchange = run; app.querySelector("#mode").onchange = run;
+  run();
+}};
+
+// ---------- Variant B: mail client (filters sidebar | results | detail pane) ----------
+const VariantB = { name: "Trois colonnes", async render(app) {
+  app.innerHTML = `<div class="B"><div class="side"><b>VeilleFacile</b>
+      <label>Recherche</label><input id="q" placeholder="mots, sens…">
+      <label>Mode</label><select id="mode"><option value="hybrid">hybride</option><option value="semantic">sémantique</option><option value="text">texte</option></select>
+      <label>Site d'origine</label><div id="sites"></div>
+      <label>Mot-clé exigé</label><input id="kw" placeholder="ex. Rust">
+      <label>Ajouter</label><div id="add"></div></div>
+    <div id="list"></div><div class="detail" id="detail"><p class="muted">Sélectionne une Source.</p></div></div>`;
+  const add = addUrlForm(s => { run(); show(s.id); }); add.style.flexDirection = "column"; add.style.alignItems = "stretch"; app.querySelector("#add").append(add);
+  let site = "", sel = null;
+  const sites = app.querySelector("#sites");
+  const drawSites = () => { sites.innerHTML = ["", ...SITES()].map(s => `<div class="item ${s === site ? "sel" : ""}" data-s="${s}">${s || "Tous"}</div>`).join("");
+    sites.querySelectorAll(".item").forEach(d => d.onclick = () => { site = d.dataset.s; drawSites(); run(); }); };
+  const run = async () => {
+    const kw = app.querySelector("#kw").value.trim();
+    const r = await api.search({ q: app.querySelector("#q").value, site, kw: kw ? [kw] : [], mode: app.querySelector("#mode").value });
+    const list = app.querySelector("#list"); list.innerHTML = `<div class="muted" style="margin-bottom:6px">${r.total} Source(s)</div>`;
+    for (const s of r.items) {
+      const it = h(`<div class="item ${s.id === sel ? "sel" : ""}"><b>${esc(s.title)}</b><div class="muted">${s.origin_site} · ${date(s.published_at)}${s.score != null ? " · " + s.score : ""}</div>
+        <div style="font-size:13px">${esc(firstLine(s.summary)).slice(0, 110)}…</div></div>`);
+      it.onclick = () => show(s.id); list.append(it);
+    }
+  };
+  const show = async id => {
+    sel = id; run();
+    const full = await api.get(id), d = app.querySelector("#detail");
+    d.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px"><h2 style="margin:0" contenteditable id="title">${esc(full.title)}</h2>
+      <button class="danger">Supprimer</button></div>
+      <div class="muted">${full.origin_site} · ${full.ingest_mode} · publié ${date(full.published_at)} · ajouté ${date(full.created_at)} · <a href="${esc(full.url)}" target="_blank">ouvrir ↗</a></div>
+      <div class="tabs" style="margin:12px 0"><button class="on" data-t="r">Résumé</button> <button data-t="t">Texte intégral</button></div><div id="pane"></div>`;
+    const pane = d.querySelector("#pane");
+    const tabR = () => { pane.innerHTML = renderSummary(full.summary) + `<h4 class="muted">MOTS-CLÉS</h4>`; pane.append(keywordEditor(full, run)); };
+    d.querySelectorAll(".tabs button").forEach(b => b.onclick = async () => { d.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
+      if (b.dataset.t === "r") tabR(); else pane.innerHTML = await fullTextBlock(id); });
+    d.querySelector("#title").onblur = async e => { const v = e.target.textContent.trim(); if (v && v !== full.title) { await api.patch(id, { title: v }); run(); } };
+    d.querySelector(".danger").onclick = async () => { if (await confirmDelete(full)) { sel = null; d.innerHTML = '<p class="muted">Supprimée.</p>'; run(); } };
+    tabR();
+  };
+  let t; app.querySelector("#q").oninput = app.querySelector("#kw").oninput = () => { clearTimeout(t); t = setTimeout(run, 250); };
+  app.querySelector("#mode").onchange = run;
+  drawSites(); run();
+}};
+
+// ---------- Variant C: dense table (spreadsheet-like, detail in a modal) ----------
+const VariantC = { name: "Tableau dense", async render(app) {
+  app.innerHTML = `<div class="C"><div class="bar"><input id="q" placeholder="Rechercher…" size="30">
+      <select id="mode"><option value="hybrid">hybride</option><option value="semantic">sémantique</option><option value="text">texte</option></select>
+      <select id="site"><option value="">site : tous</option>${SITES().map(s => `<option>${s}</option>`).join("")}</select>
+      <span style="flex:1"></span></div>
+    <table><thead><tr><th data-k="title">Titre</th><th data-k="origin_site">Site</th><th>En bref</th><th>Mots-clés</th><th data-k="published_at">Publié</th><th data-k="updated_at">MAJ</th><th></th></tr></thead><tbody></tbody></table>
+    <dialog id="dlg"></dialog></div>`;
+  app.querySelector(".bar").append(addUrlForm(() => run()));
+  let sortK = null, asc = false;
+  app.querySelectorAll("th[data-k]").forEach(th => th.onclick = () => { asc = sortK === th.dataset.k ? !asc : true; sortK = th.dataset.k; run(); });
+  const run = async () => {
+    const r = await api.search({ q: app.querySelector("#q").value, site: app.querySelector("#site").value, mode: app.querySelector("#mode").value, limit: 100 });
+    let items = r.items; if (sortK) items = items.slice().sort((a, b) => String(a[sortK] ?? "").localeCompare(String(b[sortK] ?? "")) * (asc ? 1 : -1));
+    const tb = app.querySelector("tbody"); tb.innerHTML = "";
+    for (const s of items) {
+      const tr = h(`<table><tr><td><a href="#" class="o"><b>${esc(s.title)}</b></a></td><td>${s.origin_site}</td><td class="oneline">${esc(firstLine(s.summary)).slice(0, 90)}…</td>
+        <td>${s.keywords.slice(0, 4).map(k => `<span class="chip">${esc(k)}</span>`).join("")}${s.keywords.length > 4 ? `<span class="muted">+${s.keywords.length - 4}</span>` : ""}</td>
+        <td>${date(s.published_at)}</td><td>${date(s.updated_at)}</td><td><a href="${esc(s.url)}" target="_blank">↗</a> <button class="danger" title="Supprimer">🗑</button></td></tr></table>`).querySelector("tr");
+      tr.querySelector(".o").onclick = e => { e.preventDefault(); openDlg(s.id); };
+      tr.querySelector(".danger").onclick = async () => { if (await confirmDelete(s)) run(); };
+      tb.append(tr);
+    }
+  };
+  const openDlg = async id => {
+    const full = await api.get(id), dlg = app.querySelector("#dlg");
+    dlg.innerHTML = `<div style="display:flex;justify-content:space-between"><h3 style="margin:0">${esc(full.title)}</h3><button onclick="this.closest('dialog').close()">Fermer</button></div>
+      <div class="muted">${full.origin_site} · ${full.ingest_mode} · ${full.embedding_model}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px"><div>${renderSummary(full.summary)}</div><div><h4 class="muted">MOTS-CLÉS</h4><div class="kw"></div>
+      <h4 class="muted">RÉSUMÉ (markdown brut, éditable)</h4><textarea rows="8" style="width:100%">${esc(full.summary)}</textarea><button class="save">Enregistrer le Résumé</button></div></div>
+      <details style="margin-top:10px"><summary>Texte intégral</summary><div class="ft"></div></details>`;
+    dlg.querySelector(".kw").append(keywordEditor(full, run));
+    dlg.querySelector(".save").onclick = async () => { await api.patch(id, { summary: dlg.querySelector("textarea").value }); dlg.close(); run(); };
+    dlg.querySelector("details").ontoggle = async () => dlg.querySelector(".ft").innerHTML = await fullTextBlock(id);
+    dlg.showModal();
+  };
+  let t; app.querySelector("#q").oninput = () => { clearTimeout(t); t = setTimeout(run, 250); };
+  app.querySelector("#mode").onchange = run; app.querySelector("#site").onchange = run;
+  run();
+}};
+
+// ---------- API key (stored in localStorage; the mock accepts anything) ----------
+function keyBar() {
+  const kb = document.getElementById("keybar"), k = localStorage.getItem("vf_api_key");
+  kb.innerHTML = k ? `<span class="muted">clé API enregistrée</span> <button id="forget">Oublier</button>`
+    : `<form id="kf"><input type="password" placeholder="Clé API" size="14"> <button>OK</button></form>`;
+  if (k) kb.querySelector("#forget").onclick = () => { localStorage.removeItem("vf_api_key"); keyBar(); };
+  else kb.querySelector("#kf").onsubmit = e => { e.preventDefault(); localStorage.setItem("vf_api_key", e.target[0].value || "demo"); keyBar(); };
+}
+
+// ---------- variant switcher (prototype only) ----------
+const VARIANTS = { A: VariantA, B: VariantB, C: VariantC }, keys = Object.keys(VARIANTS);
+const cur = () => { const v = new URLSearchParams(location.search).get("variant"); return keys.includes(v) ? v : "A"; };
+function go(v) { history.replaceState(null, "", "?variant=" + v); draw(); }
+function step(d) { go(keys[(keys.indexOf(cur()) + d + keys.length) % keys.length]); }
+function draw() { const v = cur(); document.getElementById("vlabel").textContent = `${v} (${VARIANTS[v].name})`; VARIANTS[v].render(document.getElementById("app")); }
+document.getElementById("prev").onclick = () => step(-1);
+document.getElementById("next").onclick = () => step(1);
+addEventListener("keydown", e => { if (e.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (e.key === "ArrowLeft") step(-1); if (e.key === "ArrowRight") step(1); });
+keyBar(); draw();
+</script>
+</body>
+</html>
