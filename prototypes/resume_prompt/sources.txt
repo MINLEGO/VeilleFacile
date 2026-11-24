@@ -1,0 +1,5 @@
+# Une Source par ligne. Remplace/complète par TES vraies Sources (5 à 10 au total).
+# Vidéo YouTube ou article capturé : `URL | chemin/vers/texte.txt` (colle la transcription dans le fichier).
+https://github.com/astral-sh/uv
+https://huggingface.co/Qwen/Qwen3-8B
+https://simonwillison.net/2024/Dec/31/llms-in-2024/
