@@ -1,5 +1,4 @@
 // Non-persistent background: does the whole click flow so it survives the popup closing.
-const hostPattern = (backendUrl) => { const u = new URL(backendUrl); return `${u.protocol}//${u.hostname}/*`; };
 
 async function setResult(tabId, result) {
   await browser.storage.session.set({ [`result:${tabId}`]: result });
@@ -8,7 +7,7 @@ async function setResult(tabId, result) {
 
 const fail = (error, action) => ({ status: "error", error, action });
 
-// Files injected per extractor (in order; the last one must evaluate to a clonable object). YouTube (#36) adds its entry here.
+// Files injected per extractor (in order; the last one must evaluate to a clonable object).
 const EXTRACTOR_FILES = {
   readability: ["vendor/Readability.js", "extractors/readability.js"],
   academic: ["extractors/academic.js"],
@@ -35,6 +34,7 @@ async function extract(tabId, url) {
 }
 
 async function send(tabId, url) {
+  await setResult(tabId, { status: "pending", step: "extraction", at: Date.now() });
   const { backendUrl, apiKey } = await browser.storage.local.get(["backendUrl", "apiKey"]);
   if (!backendUrl || !apiKey || !(await browser.permissions.contains({ origins: [hostPattern(backendUrl)] })))
     return fail("Configurer l'extension", "options");
@@ -49,6 +49,7 @@ async function send(tabId, url) {
     warnings = e.warnings || [];
   }
 
+  await setResult(tabId, { status: "pending", step: "envoi", at: Date.now() });
   return post(tabId, { url, ...extra }, warnings);
 }
 
@@ -73,17 +74,22 @@ async function post(tabId, payload, warnings = []) {
   return { status: "ok", created: resp.status === 201, source: await resp.json(), warnings };
 }
 
-async function capture(tab) {
-  await setResult(tab.id, { status: "pending", step: "envoi" });
-  await setResult(tab.id, await send(tab.id, tab.url));
-}
+// Any thrown error becomes an error result: the badge never stays on "…".
+const guard = async (tabId, run) => {
+  try { await setResult(tabId, await run()); }
+  catch { await setResult(tabId, fail("Erreur inattendue")); }
+};
 
-async function retry(tabId) {
+// The popup sends only the tab id: the URL is read here so it is never stale.
+const capture = (tabId) => guard(tabId, async () => send(tabId, (await browser.tabs.get(tabId)).url));
+
+const retry = (tabId) => guard(tabId, async () => {
   const key = `payload:${tabId}`;
-  const { payload, warnings } = (await browser.storage.session.get(key))[key];
-  await setResult(tabId, { status: "pending", step: "envoi" });
-  await setResult(tabId, await post(tabId, payload, warnings));
-}
+  const stored = (await browser.storage.session.get(key))[key];
+  if (!stored) return send(tabId, (await browser.tabs.get(tabId)).url);
+  await setResult(tabId, { status: "pending", step: "envoi", at: Date.now() });
+  return post(tabId, stored.payload, stored.warnings);
+});
 
 // A new page in the tab invalidates its stored result.
 browser.tabs.onUpdated.addListener((tabId) => {
@@ -92,6 +98,6 @@ browser.tabs.onUpdated.addListener((tabId) => {
 }, { properties: ["url"] });
 
 browser.runtime.onMessage.addListener((msg) => {
-  if (msg.type === "retry") retry(msg.tab.id);
-  if (msg.type === "capture") capture(msg.tab); // no await: the reply is read from storage
+  if (msg.type === "retry") retry(msg.tabId);
+  if (msg.type === "capture") capture(msg.tabId); // no await: the reply is read from storage
 });

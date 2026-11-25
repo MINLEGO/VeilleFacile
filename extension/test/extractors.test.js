@@ -49,6 +49,19 @@ test("Academic: abstract only, citation_title, ISO date", () => {
   });
 });
 
+test("Academic: citation_date normalised to ISO, unparseable omitted", () => {
+  const date = (d) => {
+    const { window } = new JSDOM(`<meta name="citation_abstract" content="x"><meta name="citation_date" content="${d}">`, { runScripts: "outside-only" });
+    return window.eval(read("extractors/academic.js")).published_at;
+  };
+  assert.strictEqual(date("2017-06-12"), "2017-06-12");
+  assert.strictEqual(date("2017/6/2"), "2017-06-02");
+  assert.strictEqual(date("2017/06"), "2017-06-01");
+  assert.strictEqual(date("2017"), "2017-01-01");
+  assert.strictEqual(date("June 2017"), null);
+  assert.strictEqual(date("2017/13/40"), null);
+});
+
 // YouTube: async extractor, injected like executeScript (a Promise as last value is awaited by Firefox).
 async function youtube(name, { setup } = {}) {
   const { window } = new JSDOM(fixture(name), { url: "https://www.youtube.com/watch?v=abc123", runScripts: "outside-only" });
