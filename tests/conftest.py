@@ -43,5 +43,5 @@ def client(settings, fakes):
     """TestClient with the API key preset; migrations applied, sources truncated."""
     with TestClient(create_app(settings, **fakes), headers=AUTH) as c:
         with psycopg.connect(settings.database_url) as conn:
-            conn.execute("TRUNCATE sources RESTART IDENTITY")
+            conn.execute("TRUNCATE sources, query_embeddings RESTART IDENTITY")
         yield c

@@ -1,5 +1,6 @@
 from dataclasses import replace
 
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
@@ -94,3 +95,21 @@ def test_semantic_ignores_other_model_and_flags_degraded(client, corpus, setting
         assert ids(r) == [new] and r.json()["degraded"] is False  # semantic never degrades: it ignores stale ones
         assert other.get("/api/sources", params={"q": "borrow", "mode": "text"}).json()["degraded"] is False
     assert client.get("/api/sources", params={"q": "borrow"}).json()["degraded"] is True  # new is stale for client
+
+
+def test_query_embedding_is_cached_with_lru_eviction(client, corpus, fakes, settings, monkeypatch):
+    llm = fakes["llm"]
+    for params in ({"q": "borrow"}, {"q": " borrow ", "site": "a.com"}, {"q": "borrow", "mode": "semantic"}):
+        r = client.get("/api/sources", params=params)
+        assert r.status_code == 200, r.text
+    assert llm.embedded.count("borrow") == 1  # same text + model -> one embed, whatever the filters
+    llm.fail = UpstreamError("down")
+    assert client.get("/api/sources", params={"q": "borrow", "mode": "semantic"}).status_code == 200  # served from cache
+
+    llm.fail = None
+    monkeypatch.setattr("veillefacile.search.QUERY_CACHE_SIZE", 2)
+    for q in ["b", "borrow", "c"]:  # the "borrow" hit makes "b" the least recently used
+        client.get("/api/sources", params={"q": q})
+    assert llm.embedded.count("borrow") == 1
+    with psycopg.connect(settings.database_url) as conn:
+        assert {r[0] for r in conn.execute("SELECT query FROM query_embeddings")} == {"borrow", "c"}

@@ -97,6 +97,7 @@ class OpenRouterClient:
             ra = r.headers.get("Retry-After", "")
             raise QuotaError(int(ra) if ra.isdigit() else 60)
         if r.status_code != 200:
+            log.warning("OpenRouter %s on %s: %s", r.status_code, path, r.text[:500])  # body holds the actual reason
             raise UpstreamError(f"OpenRouter returned {r.status_code}")
         try:
             return r.json()
