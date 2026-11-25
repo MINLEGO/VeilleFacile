@@ -1,5 +1,24 @@
 # VeilleFacile
 
+## Outils MCP
+
+Le serveur MCP (`/mcp`) expose six outils. Pour en désactiver certains, lister leurs noms séparés par des virgules
+dans `MCP_DISABLED_TOOLS` (les espaces autour des virgules sont ignorés) :
+
+| Outil            | Rôle                                                  |
+|------------------|-------------------------------------------------------|
+| `search_sources` | Recherche hybride, sémantique ou textuelle des Sources |
+| `get_source`     | Résumé, mots-clés et métadonnées d une Source          |
+| `get_full_text`  | Tranche du texte intégral d une Source                 |
+| `add_source`     | Ajoute une Source par URL                              |
+| `update_source`  | Modifie titre, résumé ou mots-clés                     |
+| `delete_source`  | Supprime définitivement une Source                     |
+
+Exemple : `MCP_DISABLED_TOOLS=update_source,delete_source,add_source` ne laisse que la lecture.
+
+Attention : une valeur vide prend le défaut `update_source,delete_source`. Pour tout activer, mettre une valeur qui ne
+correspond à aucun outil, par exemple `MCP_DISABLED_TOOLS=none`.
+
 ## Tests
 
 ```
