@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  body { width: 560px; font: 13px system-ui, sans-serif; margin: 10px; }
+  dt { font-weight: 600; margin-top: 6px; }
+  textarea { width: 100%; height: 220px; font: 12px monospace; }
+  pre { white-space: pre-wrap; background: #f3f3f3; padding: 6px; max-height: 180px; overflow: auto; }
+  .warn { color: #b00; font-weight: 600; }
+</style>
+<p id="status">Extraction en cours…</p>
+<dl>
+  <dt>title</dt><dd id="title"></dd>
+  <dt>published_at</dt><dd id="date"></dd>
+  <dt>full_text (<span id="len">0</span> caractères)</dt>
+  <dd><textarea id="text" readonly></textarea></dd>
+  <dt>debug</dt><dd><pre id="debug"></pre></dd>
+</dl>
+<script src="popup.js"></script>
