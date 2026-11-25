@@ -1,0 +1,13 @@
+{
+  "name": "veillefacile-extension",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "sign": "web-ext sign --source-dir addon --channel=unlisted"
+  },
+  "devDependencies": {
+    "jsdom": "^26.0.0",
+    "web-ext": "^8.0.0"
+  }
+}

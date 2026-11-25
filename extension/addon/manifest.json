@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "VeilleFacile",
+  "version": "0.1.0",
+  "description": "Enregistre la page courante dans VeilleFacile en un clic.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "optional_host_permissions": ["*://*/*"],
+  "background": { "scripts": ["hosts.js", "routing.js", "errors.js", "background.js"] },
+  "action": { "default_title": "Enregistrer dans VeilleFacile", "default_popup": "popup.html" },
+  "options_ui": { "page": "options.html", "open_in_tab": true },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "veillefacile@minlego",
+      "data_collection_permissions": { "required": ["websiteContent", "browsingActivity"] }
+    }
+  }
+}
