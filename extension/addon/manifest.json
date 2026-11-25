@@ -5,7 +5,7 @@
   "description": "Enregistre la page courante dans VeilleFacile en un clic.",
   "permissions": ["activeTab", "scripting", "storage"],
   "optional_host_permissions": ["*://*/*"],
-  "background": { "scripts": ["routing.js", "background.js"] },
+  "background": { "scripts": ["routing.js", "errors.js", "background.js"] },
   "action": { "default_title": "Enregistrer dans VeilleFacile", "default_popup": "popup.html" },
   "options_ui": { "page": "options.html", "open_in_tab": true },
   "browser_specific_settings": {

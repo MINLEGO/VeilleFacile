@@ -1,3 +1,4 @@
+let tabId;
 const root = document.getElementById("root");
 const el = (tag, text, cls) => Object.assign(document.createElement(tag), { textContent: text, className: cls || "" });
 
@@ -11,6 +12,11 @@ function render(r) {
       b.onclick = () => browser.runtime.openOptionsPage();
       root.append(b);
     }
+    if (r.action === "retry") {
+      const b = el("button", "Réessayer");
+      b.onclick = () => browser.runtime.sendMessage({ type: "retry", tab: { id: tabId } });
+      root.append(b);
+    }
     return;
   }
   const s = r.source;
@@ -20,6 +26,7 @@ function render(r) {
 
 (async () => {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  tabId = tab.id;
   const key = `result:${tab.id}`;
   browser.storage.onChanged.addListener((ch) => ch[key] && render(ch[key].newValue));
   // Reopening shows the last result; a new send happens only when none is stored (shortcut: no resend button yet).
