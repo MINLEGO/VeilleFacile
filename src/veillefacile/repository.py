@@ -38,3 +38,23 @@ class SourceRepository:
              f"RETURNING {COLUMNS}, (xmax = 0) AS created")
         stored = self._one(q, [row[c] for c in cols] + [vector_literal(embedding), embedding_model, index_text])
         return stored, stored.pop("created")
+
+    def update(self, source_id: int, fields: dict, index_text: str | None = None, embedding: list[float] | None = None,
+               embedding_model: str | None = None) -> dict | None:
+        """Update plain columns (title, summary, *_keywords); with index_text+embedding also refreshes tsvector and
+        embedding. Returns the row, or None if absent."""
+        sets, params = [f"{c} = %s" for c in fields], list(fields.values())
+        if index_text is not None:
+            sets += ["search_text = to_tsvector('english', %s)", "embedding = %s::vector", "embedding_model = %s"]
+            params += [index_text, vector_literal(embedding), embedding_model]
+        return self._one(f"UPDATE sources SET {', '.join(sets)}, updated_at = now() WHERE id = %s "
+                         f"RETURNING {COLUMNS}", params + [source_id])
+
+    def text_slice(self, source_id: int, start: int, length: int | None) -> dict | None:
+        """-> {"text", "start", "total_length"} (length None = to the end)."""
+        return self._one("SELECT substr(full_text, %s, coalesce(%s, length(full_text))) AS text, %s::int AS start, length(full_text) AS total_length "
+                         "FROM sources WHERE id = %s", (start + 1, length, start, source_id))
+
+    def delete(self, source_id: int) -> bool:
+        with psycopg.connect(self.database_url) as conn:
+            return conn.execute("DELETE FROM sources WHERE id = %s", (source_id,)).rowcount > 0

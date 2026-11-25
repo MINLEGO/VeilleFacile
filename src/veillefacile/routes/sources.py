@@ -56,3 +56,34 @@ def get_source(source_id: int, request: Request):
     if row is None:
         raise HTTPException(404, "Source not found")
     return source_out(row)
+
+
+class SourcePatch(BaseModel):
+    title: str | None = None
+    summary: str | None = None
+    keywords: list[str] | None = None
+    add_keywords: list[str] = []
+    remove_keywords: list[str] = []
+
+
+@router.patch("/{source_id}")
+async def patch_source(source_id: int, body: SourcePatch, request: Request):
+    row = await request.app.state.ingestion.edit(source_id, **body.model_dump())
+    if row is None:
+        raise HTTPException(404, "Source not found")
+    return source_out(row)
+
+
+@router.get("/{source_id}/text")
+def get_source_text(source_id: int, request: Request, start: int = Query(0, ge=0),
+                    length: int | None = Query(None, ge=0)):
+    out = request.app.state.repo.text_slice(source_id, start, length)
+    if out is None:
+        raise HTTPException(404, "Source not found")
+    return out
+
+
+@router.delete("/{source_id}", status_code=204)
+def delete_source(source_id: int, request: Request):
+    if not request.app.state.repo.delete(source_id):
+        raise HTTPException(404, "Source not found")

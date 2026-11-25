@@ -65,3 +65,25 @@ class IngestionService:
                "generated_keywords": k.generated, "manual_keywords": k.manual, "rejected_keywords": k.rejected,
                "full_text": full_text, "ingest_mode": mode, "published_at": published_at}
         return self.repo.upsert(row, text, embedding, self.embedding_model)
+
+    async def edit(self, source_id: int, *, title: str | None = None, summary: str | None = None,
+                   keywords: list[str] | None = None, add_keywords: list[str] = (),
+                   remove_keywords: list[str] = ()) -> dict | None:
+        """Manual correction (PATCH, no summary LLM call): applies keywords replace, then add, then remove;
+        re-embeds and re-indexes. -> updated row, None if absent."""
+        row = self.repo.get(source_id)
+        if row is None:
+            return None
+        title = title or row["title"]
+        summary = summary if summary is not None else row["summary"]
+        k = keywords_of(row)
+        if keywords is not None:
+            k = kw.replace(k, keywords)
+        for word in add_keywords:
+            k = kw.add(k, word)
+        for word in remove_keywords:
+            k = kw.remove(k, word)
+        text, embedding = await self.embed_index(title, summary, k)
+        fields = {"title": title, "summary": summary, "generated_keywords": k.generated,
+                  "manual_keywords": k.manual, "rejected_keywords": k.rejected}
+        return self.repo.update(source_id, fields, text, embedding, self.embedding_model)
