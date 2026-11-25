@@ -1,6 +1,5 @@
+"""URL canonicalisation, observed on the Source returned by POST /api/sources."""
 import pytest
-
-from veillefacile.urls import canonicalize
 
 CASES = [
     ("https://www.youtube.com/watch?v=abc123&t=42s&list=x", "https://youtube.com/watch?v=abc123", "youtube.com"),
@@ -18,5 +17,9 @@ CASES = [
 
 
 @pytest.mark.parametrize("raw,canonical,site", CASES)
-def test_canonicalize(raw, canonical, site):
-    assert canonicalize(raw) == (canonical, site)
+def test_canonicalize(client, raw, canonical, site):
+    r = client.post("/api/sources", json={"url": raw, "full_text": "text"})
+    assert r.status_code == 201, r.text
+    assert (r.json()["canonical_url"], r.json()["origin_site"]) == (canonical, site)
+    again = client.post("/api/sources", json={"url": canonical, "full_text": "text"})  # same Source
+    assert again.status_code == 200 and again.json()["id"] == r.json()["id"]

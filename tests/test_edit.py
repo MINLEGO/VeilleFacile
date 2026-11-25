@@ -1,5 +1,3 @@
-import psycopg
-
 from .test_capture import post
 
 
@@ -7,27 +5,26 @@ def patch(client, sid, **body):
     return client.patch(f"/api/sources/{sid}", json=body)
 
 
-def test_patch_title_summary_no_llm_summary_and_reindexes(client, fakes, settings):
+def test_patch_title_summary_no_llm_summary_and_reindexes(client, fakes):
     sid = post(client).json()["id"]
     calls = fakes["llm"].summarize_calls
     s = patch(client, sid, title="Zebra title", summary="## What it is\nstripes").json()
     assert s["title"] == "Zebra title" and s["summary"].endswith("stripes")
     assert fakes["llm"].summarize_calls == calls
-    with psycopg.connect(settings.database_url) as c:
-        hit = c.execute("SELECT count(*) FROM sources WHERE search_text @@ plainto_tsquery('english','zebra')")
-        assert hit.fetchone()[0] == 1
-        emb = c.execute("SELECT embedding::text FROM sources").fetchone()[0]
-    assert emb.startswith("[")
+    text = client.get("/api/sources", params={"q": "zebra", "mode": "text"}).json()["results"]
+    assert [r["id"] for r in text] == [sid]
+    sem = client.get("/api/sources", params={"q": "Zebra title\n## What it is\nstripes", "mode": "semantic"})
+    assert sem.json()["results"][0]["id"] == sid  # re-embedded on the new text
 
 
 def test_patch_keyword_rules(client):
     sid = post(client, keywords=["Mine"]).json()["id"]  # generated [fake], manual [Mine]
     s = patch(client, sid, remove_keywords=["FAKE", "mine"]).json()
-    assert s["keywords"] == [] and [w.lower() for w in s["rejected_keywords"]] == ["fake"] and s["manual_keywords"] == []
-    s = patch(client, sid, add_keywords=["Fake"]).json()
-    assert s["manual_keywords"] == ["Fake"] and s["rejected_keywords"] == [] and s["keywords"] == ["fake"]
+    assert s["keywords"] == [] and s["rejected_keywords"] == ["FAKE", "mine"] and s["manual_keywords"] == []
+    s = patch(client, sid, add_keywords=["Fake"]).json()  # rehabilitated
+    assert s["manual_keywords"] == ["Fake"] and s["rejected_keywords"] == ["mine"] and s["keywords"] == ["fake"]
     s = patch(client, sid, keywords=["Only"]).json()
-    assert s["manual_keywords"] == ["Only"] and s["rejected_keywords"] == ["fake"] and s["keywords"] == ["Only"]
+    assert s["manual_keywords"] == ["Only"] and s["rejected_keywords"] == ["mine", "fake"] and s["keywords"] == ["Only"]
 
 
 def test_rejected_keyword_survives_reingest(client):

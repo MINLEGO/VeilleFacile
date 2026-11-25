@@ -117,3 +117,18 @@ def test_append_history_writes_header_once(tmp_path):
     assert rows[0] == HISTORY_FIELDS
     assert len(rows) == 3
     assert rows[1][HISTORY_FIELDS.index("k")] == "60"
+
+
+def test_failed_request_counts_as_miss_and_run_continues():
+    import urllib.error
+
+    items = parse_queries(YAML_SAMPLE)
+
+    def fetch(url):
+        if "pgvector" in url:
+            raise urllib.error.URLError("boom")
+        return {"results": [{"canonical_url": "https://example.com/semantic"}]}
+
+    report = run_eval(items, "http://api", fetch, modes=("hybrid",), limit=5)
+    assert report["hybrid"]["overall"]["n"] == 3 and report["hybrid"]["overall"]["hit5"] == pytest.approx(1 / 3)
+    assert any("request failed" in w for w in report["hybrid"]["warnings"])

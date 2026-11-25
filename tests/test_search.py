@@ -91,6 +91,6 @@ def test_semantic_ignores_other_model_and_flags_degraded(client, corpus, setting
     with TestClient(create_app(replace(settings, embedding_model="other"), **fakes), headers=AUTH) as other:
         new = add(other, "https://c.com/new", "Brand new", "borrow fresh")
         r = other.get("/api/sources", params={"q": "borrow", "mode": "semantic"})
-        assert ids(r) == [new] and r.json()["degraded"] is True
+        assert ids(r) == [new] and r.json()["degraded"] is False  # semantic never degrades: it ignores stale ones
         assert other.get("/api/sources", params={"q": "borrow", "mode": "text"}).json()["degraded"] is False
     assert client.get("/api/sources", params={"q": "borrow"}).json()["degraded"] is True  # new is stale for client

@@ -23,10 +23,10 @@ def test_health_503_when_db_unreachable(settings, fakes):
 def test_protected_route_requires_key(client):
     anon = TestClient(client.app)
     for headers in ({}, {"Authorization": "Bearer wrong"}):
-        r = anon.get("/api/ping", headers=headers)
+        r = anon.get("/api/sources", headers=headers)
         assert r.status_code == 401
         assert "detail" in r.json()
-    assert client.get("/api/ping").status_code == 200
+    assert client.get("/api/sources").status_code == 200
 
 
 def test_migrations_recorded_and_sources_schema(client, settings):

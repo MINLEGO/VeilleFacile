@@ -19,13 +19,14 @@ class FakeLLM:
     def __init__(self):
         self.fail: Exception | None = None  # set to simulate outages (timeout, quota...)
         self.summarize_calls = 0
+        self.keywords = ["fake"]  # what summarize "generates"
 
     async def summarize(self, text: str, *, title: str = "", url: str = "", site: str = "") -> tuple[str, list[str]]:
         """Returns (summary markdown, generated keywords)."""
         self.summarize_calls += 1
         if self.fail:
             raise self.fail
-        return f"## What it is\n{text[:100]}\n## Keywords\nfake", ["fake"]
+        return f"## What it is\n{text[:100]}\n## Keywords\nfake", list(self.keywords)
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         if self.fail:
