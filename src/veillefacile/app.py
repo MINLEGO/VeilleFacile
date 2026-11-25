@@ -6,7 +6,13 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Respons
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .clients import GitHubClient, HuggingFaceClient, OpenRouterClient
+from fastapi.responses import JSONResponse
+
 from .db import migrate
+from .errors import CaptureRequired, QuotaError, UpstreamError
+from .ingestion import IngestionService
+from .repository import SourceRepository
+from .routes import sources
 from .settings import Settings
 
 _bearer = HTTPBearer(auto_error=False)
@@ -33,6 +39,24 @@ def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=No
     app.state.github = github or GitHubClient(settings.github_token)
     app.state.hf = hf or HuggingFaceClient()
 
+    app.state.repo = SourceRepository(settings.database_url)
+    app.state.ingestion = IngestionService(
+        app.state.repo, app.state.llm, {"github.com": app.state.github, "huggingface.co": app.state.hf},
+        settings.embedding_model)
+
+    @app.exception_handler(UpstreamError)
+    async def _upstream(request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+    @app.exception_handler(QuotaError)
+    async def _quota(request, exc):
+        return JSONResponse({"detail": "Quota exhausted"}, status_code=503,
+                            headers={"Retry-After": str(exc.retry_after)})
+
+    @app.exception_handler(CaptureRequired)
+    async def _capture(request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=422)
+
     api = APIRouter(prefix="/api")
 
     @api.get("/health")
@@ -51,6 +75,8 @@ def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=No
     @protected.get("/ping")
     def ping():
         return {"ping": "pong"}
+
+    protected.include_router(sources.router)  # one line per route module
 
     app.include_router(api)
     app.include_router(protected)

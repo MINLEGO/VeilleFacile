@@ -16,9 +16,11 @@ def fake_embedding(text: str) -> list[float]:
 class FakeLLM:
     def __init__(self):
         self.fail: Exception | None = None  # set to simulate outages (timeout, quota...)
+        self.summarize_calls = 0
 
-    async def summarize(self, text: str) -> tuple[str, list[str]]:
+    async def summarize(self, text: str, *, title: str = "", url: str = "", site: str = "") -> tuple[str, list[str]]:
         """Returns (summary markdown, generated keywords)."""
+        self.summarize_calls += 1
         if self.fail:
             raise self.fail
         return f"## What it is\n{text[:100]}\n## Keywords\nfake", ["fake"]

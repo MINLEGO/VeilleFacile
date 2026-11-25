@@ -1,13 +1,59 @@
-"""Narrow interfaces to external services. Tests inject fakes; real classes are filled in by later tickets."""
+"""Narrow interfaces to external services. Tests inject fakes; GitHub/HF fetchers are filled in by #18."""
+import logging
+import re
 from typing import Protocol
+
+import httpx
+
+from .errors import QuotaError, UpstreamError
+
+log = logging.getLogger("veillefacile.llm")
+
+TIMEOUT = 90
+MAX_CHARS = 100_000  # shortcut: hard truncation of the full text sent to the LLM
+EMBED_BATCH = 32
+OPENROUTER = "https://openrouter.ai/api/v1"
+SECTIONS = ["What it is", "Why it matters", "Key points", "Who it's for", "Keywords"]
+
+# Validated prompt (vf-notes/resume_prompt_run.py), reused verbatim; the summary language is fixed to English.
+PROMPT = """You write the summary card of a saved web resource for a personal tech watch (veille) database.
+The card must let the reader decide, months later, whether the resource is worth reopening, and make it findable by search.
+
+Resource: {title}
+URL: {url}
+Site: {site}
+
+Full text (may be truncated):
+<<<
+{text}
+>>>
+
+Write the content in {lang}, but keep the five headings below exactly as written, in English.
+Use EXACTLY this format and nothing else (no preamble, no closing remark):
+
+## What it is
+<2-3 sentences: what the resource is and what it does/claims, concretely.>
+
+## Why it matters
+<1-2 sentences: what is new, notable, or useful compared to the usual. No hype words.>
+
+## Key points
+- <3 to 6 bullets: concrete facts, numbers, techniques, limitations>
+
+## Who it's for
+<1 sentence: who should reopen this, and for what need.>
+
+## Keywords
+<8 to 15 comma-separated keywords. Mostly proper nouns as written in the source (tools, models, libraries, companies, authors, datasets, benchmarks), plus a few topic terms. No generic words like "AI" or "tool".>
+"""
 
 
 class LLMClient(Protocol):
-    async def summarize(self, text: str) -> tuple[str, list[str]]:
-        """Full text -> (structured summary markdown, generated keywords)."""
+    async def summarize(self, text: str, *, title: str = "", url: str = "", site: str = "") -> tuple[str, list[str]]:
+        """Full text -> (structured summary markdown, generated keywords). Raises UpstreamError / QuotaError."""
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        """Texts -> embeddings (batched by the caller)."""
+        """Texts -> embeddings (batched internally). Raises UpstreamError / QuotaError."""
 
 
 class SourceFetcher(Protocol):
@@ -17,15 +63,61 @@ class SourceFetcher(Protocol):
         """-> {"title": str, "full_text": str, "published_at": datetime | None}"""
 
 
-class OpenRouterClient:
-    def __init__(self, api_key: str, summary_model: str, embedding_model: str):
-        self.api_key, self.summary_model, self.embedding_model = api_key, summary_model, embedding_model
+def parse_summary(out: str) -> tuple[str, list[str]]:
+    """Split on `##` headings; all five must be present, else UpstreamError."""
+    found = {}
+    for chunk in re.split(r"^##\s*", out, flags=re.M)[1:]:
+        head, _, body = chunk.partition("\n")
+        found[head.strip()] = body.strip()
+    missing = [s for s in SECTIONS if not found.get(s)]
+    if missing:
+        raise UpstreamError(f"summary is missing sections: {missing}")
+    return out.strip(), [k.strip() for k in found["Keywords"].split(",") if k.strip()]
 
-    async def summarize(self, text: str) -> tuple[str, list[str]]:
-        raise NotImplementedError  # later ticket
+
+class OpenRouterClient:
+    def __init__(self, api_key: str, summary_model: str, embedding_model: str, *, transport=None):
+        self.summary_models = [m.strip() for m in summary_model.split(",") if m.strip()]
+        self.embedding_model = embedding_model
+        self.http = httpx.AsyncClient(base_url=OPENROUTER, timeout=TIMEOUT, transport=transport,
+                                      headers={"Authorization": f"Bearer {api_key}"})
+
+    async def _post(self, path: str, body: dict) -> dict:
+        try:
+            r = await self.http.post(path, json=body)
+        except httpx.HTTPError as e:  # timeouts and network errors
+            raise UpstreamError(f"OpenRouter unreachable: {type(e).__name__}") from e
+        if r.status_code == 429:
+            ra = r.headers.get("Retry-After", "")
+            raise QuotaError(int(ra) if ra.isdigit() else 60)
+        if r.status_code != 200:
+            raise UpstreamError(f"OpenRouter returned {r.status_code}")
+        try:
+            return r.json()
+        except ValueError as e:
+            raise UpstreamError("OpenRouter returned invalid JSON") from e
+
+    async def summarize(self, text: str, *, title: str = "", url: str = "", site: str = "") -> tuple[str, list[str]]:
+        prompt = PROMPT.format(title=title, url=url, site=site, text=text[:MAX_CHARS], lang="English")
+        data = await self._post("/chat/completions", {
+            "models": self.summary_models, "temperature": 0.2,
+            "messages": [{"role": "user", "content": prompt}]})
+        try:
+            out = data["choices"][0]["message"]["content"] or ""
+        except (KeyError, IndexError, TypeError) as e:
+            raise UpstreamError("unexpected OpenRouter response") from e
+        log.info("summary generated by model %s", data.get("model"))
+        return parse_summary(out)
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        raise NotImplementedError  # later ticket
+        vectors: list[list[float]] = []
+        for i in range(0, len(texts), EMBED_BATCH):
+            data = await self._post("/embeddings", {"model": self.embedding_model, "input": texts[i:i + EMBED_BATCH]})
+            try:
+                vectors += [d["embedding"] for d in sorted(data["data"], key=lambda d: d["index"])]
+            except (KeyError, TypeError) as e:
+                raise UpstreamError("unexpected OpenRouter embeddings response") from e
+        return vectors
 
 
 class GitHubClient:
@@ -33,9 +125,9 @@ class GitHubClient:
         self.token = token
 
     async def fetch(self, canonical_url: str) -> dict:
-        raise NotImplementedError  # later ticket
+        raise NotImplementedError  # #18
 
 
 class HuggingFaceClient:
     async def fetch(self, canonical_url: str) -> dict:
-        raise NotImplementedError  # later ticket
+        raise NotImplementedError  # #18

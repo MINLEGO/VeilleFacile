@@ -1,0 +1,42 @@
+from datetime import datetime
+from typing import Literal
+
+from fastapi import APIRouter, HTTPException, Request, Response
+from pydantic import BaseModel
+
+from ..ingestion import keywords_of
+from ..keywords import effective
+
+router = APIRouter(prefix="/sources")
+
+
+def source_out(row: dict) -> dict:
+    """Public JSON of a Source: no full_text (see /text), no embedding; adds effective `keywords`."""
+    out = {k: v for k, v in row.items() if k != "full_text"}
+    out["keywords"] = effective(keywords_of(row))
+    return out
+
+
+class SourceIn(BaseModel):
+    url: str
+    title: str | None = None
+    full_text: str | None = None
+    published_at: datetime | None = None
+    summary: str | None = None
+    keywords: list[str] | None = None
+    keywords_mode: Literal["append", "replace"] = "append"
+
+
+@router.post("", status_code=201)
+async def create_source(body: SourceIn, request: Request, response: Response):
+    row, created = await request.app.state.ingestion.ingest(**body.model_dump())
+    response.status_code = 201 if created else 200
+    return source_out(row)
+
+
+@router.get("/{source_id}")
+def get_source(source_id: int, request: Request):
+    row = request.app.state.repo.get(source_id)
+    if row is None:
+        raise HTTPException(404, "Source not found")
+    return source_out(row)
