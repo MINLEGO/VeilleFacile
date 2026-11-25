@@ -30,7 +30,7 @@ def database_url():
 
 @pytest.fixture
 def settings(database_url):
-    return Settings(api_key=API_KEY, database_url=database_url)
+    return Settings(api_key=API_KEY, database_url=database_url, skip_model_check=True)
 
 
 @pytest.fixture

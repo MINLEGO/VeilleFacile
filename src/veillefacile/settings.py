@@ -20,6 +20,7 @@ class Settings:
     summary_model: str = DEFAULT_SUMMARY_MODEL
     migrations_dir: str = str(Path(__file__).parent / "migrations")
     skip_migrations: bool = False  # tests only
+    skip_model_check: bool = False  # tests only: no OpenRouter model list lookup at startup
 
     @classmethod
     def from_env(cls) -> "Settings":
