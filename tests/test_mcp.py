@@ -35,7 +35,7 @@ def test_default_disables_update_and_delete(client):
 def full_client(settings, fakes):
     with TestClient(create_app(replace(settings, mcp_disabled_tools=""), **fakes), headers=AUTH) as c:
         with psycopg.connect(settings.database_url) as conn:
-            conn.execute("TRUNCATE sources RESTART IDENTITY")
+            conn.execute("TRUNCATE sources, query_embeddings RESTART IDENTITY")
         yield c
 
 
