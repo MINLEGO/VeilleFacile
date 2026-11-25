@@ -1,0 +1,22 @@
+# Jeu de reference (example). Format: a deliberately tiny YAML subset, parsed by eval/eval_search.py.
+# Each item starts with "- " at column 0 and has, indented by 2 spaces:
+#   query:    the search text (quoted or bare)
+#   type:     proper_noun | concept | french
+#   expected: list of canonical URLs of the Sources this query must find, one "    - <url>" per line
+# Nothing else is supported (no nesting, flow style, anchors or multi-line strings).
+# Placeholder URLs below: replace them with real canonical URLs of your Sources.
+
+- query: "pgvector"
+  type: proper_noun
+  expected:
+    - https://github.com/pgvector/pgvector
+
+- query: "retrouver une idée sans se souvenir du titre"
+  type: concept
+  expected:
+    - https://example.com/placeholder-concept-source
+
+- query: "tutoriel de recherche hybride en français"
+  type: french
+  expected:
+    - https://youtube.com/watch?v=placeholder
