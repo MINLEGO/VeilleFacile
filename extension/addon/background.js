@@ -8,6 +8,30 @@ async function setResult(tabId, result) {
 
 const fail = (error, action) => ({ status: "error", error, action });
 
+// Files injected per extractor (in order; the last one must evaluate to a clonable object). YouTube (#36) adds its entry here.
+const EXTRACTOR_FILES = {
+  readability: ["vendor/Readability.js", "extractors/readability.js"],
+  academic: ["extractors/academic.js"],
+};
+
+const inject = async (tabId, files) => (await browser.scripting.executeScript({ target: { tabId }, files }))[0].result;
+
+// -> payload fields, or {fail} (about:, PDF viewer, reader mode, AMO refuse injection)
+async function extract(tabId, url) {
+  try {
+    const hasCitationAbstract = (await browser.scripting.executeScript({
+      target: { tabId },
+      func: () => !!document.querySelector('meta[name="citation_abstract"]'),
+    }))[0].result;
+    const decision = route(url, { hasCitationAbstract });
+    const r = await inject(tabId, EXTRACTOR_FILES[decision.extractor]);
+    if (!r.full_text?.trim()) return { fail: fail("Aucun texte extrait") };
+    return { payload: { title: r.title, full_text: r.full_text, ...(r.published_at && { published_at: r.published_at }) } };
+  } catch {
+    return { fail: fail("Page non capturable") };
+  }
+}
+
 async function send(tabId, url) {
   const { backendUrl, apiKey } = await browser.storage.local.get(["backendUrl", "apiKey"]);
   if (!backendUrl || !apiKey || !(await browser.permissions.contains({ origins: [hostPattern(backendUrl)] })))
@@ -15,15 +39,19 @@ async function send(tabId, url) {
 
   const decision = route(url);
   if (decision.action === "refuse") return fail(decision.reason);
-  // shortcut: only URL-only routes are implemented (#33); extractors come with #34/#36.
-  if (decision.action === "extract") return fail("Extracteur pas encore disponible");
+  let extra = {};
+  if (decision.action === "extract") {
+    const e = await extract(tabId, url);
+    if (e.fail) return e.fail;
+    extra = e.payload;
+  }
 
   let resp;
   try {
     resp = await fetch(new URL("/api/sources", backendUrl), {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, ...extra }),
     });
   } catch {
     return fail(`Backend injoignable à ${backendUrl}`);
