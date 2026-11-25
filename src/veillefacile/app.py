@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from .db import migrate
 from .errors import CaptureRequired, QuotaError, UpstreamError
 from .ingestion import IngestionService
+from .mcp_server import build_mcp, mount_mcp
 from .repository import SourceRepository
 from .routes import sources
 from .settings import Settings
@@ -31,7 +32,8 @@ def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=No
     async def lifespan(app: FastAPI):
         if not settings.skip_migrations:
             migrate(settings.database_url, settings.migrations_dir)
-        yield
+        async with mcp.session_manager.run():
+            yield
 
     app = FastAPI(lifespan=lifespan)
     app.state.settings = settings
@@ -43,6 +45,8 @@ def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=No
     app.state.ingestion = IngestionService(
         app.state.repo, app.state.llm, {"github.com": app.state.github, "huggingface.co": app.state.hf},
         settings.embedding_model)
+
+    mcp = build_mcp(app)  # read by `lifespan` at startup
 
     @app.exception_handler(UpstreamError)
     async def _upstream(request, exc):
@@ -80,4 +84,5 @@ def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=No
 
     app.include_router(api)
     app.include_router(protected)
+    mount_mcp(app, mcp)
     return app
