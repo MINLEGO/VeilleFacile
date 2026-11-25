@@ -48,3 +48,10 @@ def test_failing_migration_prevents_startup(settings, fakes, tmp_path):
     with pytest.raises(Exception):
         with TestClient(create_app(bad, **fakes)):
             pass
+
+
+def test_ui_served_at_root_without_key(client):
+    r = TestClient(client.app).get("/")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "VeilleFacile" in r.text
