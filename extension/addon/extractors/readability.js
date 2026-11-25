@@ -2,8 +2,8 @@
 function vfExtractReadability(doc) {
   const parsed = new Readability(doc.cloneNode(true)).parse();
   // textContent glues paragraphs together: add a newline after each block element first.
-  const div = doc.createElement("div");
-  div.innerHTML = parsed?.content || "";
+  // Inert document: parsing here never loads images or runs handlers of the visited page's content.
+  const div = new doc.defaultView.DOMParser().parseFromString(parsed?.content || "", "text/html").body;
   div.querySelectorAll("p,h1,h2,h3,h4,h5,h6,li,pre,blockquote,tr,div,br,figcaption").forEach((el) => el.after("\n"));
   const full_text = div.textContent
     .replace(/[ \t]+/g, " ")
