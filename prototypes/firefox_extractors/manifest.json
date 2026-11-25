@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "VeilleFacile PROTOTYPE extracteurs",
+  "version": "0.0.1",
+  "description": "Prototype jetable (ticket #28) : affiche ce que les extracteurs lisent sur l'onglet courant.",
+  "permissions": ["activeTab", "scripting"],
+  "action": { "default_title": "Tester l'extraction", "default_popup": "popup.html" },
+  "browser_specific_settings": { "gecko": { "id": "vf-proto-extract@example.invalid" } }
+}
