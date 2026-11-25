@@ -2,7 +2,14 @@
 name = "veillefacile"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["fastapi", "uvicorn", "psycopg[binary]", "pgvector", "httpx"]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "psycopg[binary]",
+    "pgvector",
+    "httpx",
+    "mcp<2",
+]
 
 [dependency-groups]
 dev = ["pytest"]

@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from .db import migrate
 from .errors import CaptureRequired, QuotaError, UpstreamError
 from .ingestion import IngestionService
+from .mcp_server import build_mcp, mount_mcp
 from .reembed import check_model, fetch_models
 from .repository import SourceRepository
 from .routes import sources
@@ -36,7 +37,8 @@ def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=No
             migrate(settings.database_url, settings.migrations_dir)
         fetch = models or (None if settings.skip_model_check else fetch_models)
         app.state.warnings = await check_model(fetch, settings.embedding_model) if fetch else []
-        yield
+        async with mcp.session_manager.run():
+            yield
 
     app = FastAPI(lifespan=lifespan)
     app.state.settings = settings
@@ -48,6 +50,8 @@ def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=No
     app.state.ingestion = IngestionService(
         app.state.repo, app.state.llm, {"github.com": app.state.github, "huggingface.co": app.state.hf},
         settings.embedding_model)
+
+    mcp = build_mcp(app)  # read by `lifespan` at startup
 
     @app.exception_handler(UpstreamError)
     async def _upstream(request, exc):
@@ -86,6 +90,7 @@ def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=No
 
     app.include_router(api)
     app.include_router(protected)
+    mount_mcp(app, mcp)
 
     @app.get("/", include_in_schema=False)
     def ui():
