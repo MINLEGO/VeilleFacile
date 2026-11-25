@@ -147,3 +147,10 @@ def test_openrouter_embeddings_batched_by_32_in_order():
 
     out = asyncio.run(_client(handler).embed([str(i) for i in range(70)]))
     assert calls == [32, 32, 6] and [v[0] for v in out] == list(range(70))
+
+
+def test_fetch_404_is_502_and_creates_no_source(client, settings):
+    r = client.post("/api/sources", json={"url": "https://github.com/foo/missing"})
+    assert r.status_code == 502 and "not found" in r.json()["detail"]
+    with psycopg.connect(settings.database_url) as conn:
+        assert conn.execute("SELECT count(*) FROM sources").fetchone()[0] == 0

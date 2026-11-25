@@ -14,6 +14,7 @@ class Settings:
     database_url: str
     openrouter_api_key: str = ""
     github_token: str = ""
+    hf_token: str = ""
     mcp_disabled_tools: str = "update_source,delete_source"
     embedding_model: str = "nvidia/nemotron-3.5-embed-8b:free"
     summary_model: str = DEFAULT_SUMMARY_MODEL
@@ -29,6 +30,7 @@ class Settings:
             database_url=e["DATABASE_URL"],
             openrouter_api_key=e.get("OPENROUTER_API_KEY", ""),
             github_token=e.get("GITHUB_TOKEN", ""),
+            hf_token=e.get("HF_TOKEN", ""),
             mcp_disabled_tools=e.get("MCP_DISABLED_TOOLS", d.mcp_disabled_tools),
             embedding_model=e.get("EMBEDDING_MODEL", d.embedding_model),
             summary_model=e.get("SUMMARY_MODEL", d.summary_model),

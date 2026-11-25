@@ -2,6 +2,8 @@
 import hashlib
 import re
 
+from veillefacile.errors import UpstreamError
+
 DIM = 64
 
 
@@ -36,6 +38,8 @@ class FakeGitHub:
         self.pages: dict[str, dict] = {}  # canonical_url -> {"title", "full_text", "published_at"}
 
     async def fetch(self, canonical_url: str) -> dict:
+        if canonical_url not in self.pages:  # same contract as the real clients on a 404
+            raise UpstreamError(f"not found: {canonical_url}")
         return self.pages[canonical_url]
 
 

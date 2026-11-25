@@ -1,7 +1,9 @@
-"""Narrow interfaces to external services. Tests inject fakes; GitHub/HF fetchers are filled in by #18."""
+"""Narrow interfaces to external services. Tests inject fakes."""
 import logging
 import re
+from datetime import datetime
 from typing import Protocol
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -120,14 +122,63 @@ class OpenRouterClient:
         return vectors
 
 
+def _date(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+
+
+async def _get(http: httpx.AsyncClient, service: str, url: str, **kw) -> httpx.Response:
+    try:
+        return await http.get(url, **kw)
+    except httpx.HTTPError as e:  # timeouts and network errors
+        raise UpstreamError(f"{service} unreachable: {type(e).__name__}") from e
+
+
 class GitHubClient:
-    def __init__(self, token: str):
-        self.token = token
+    def __init__(self, token: str = "", *, transport=None):
+        headers = {"User-Agent": "VeilleFacile/1.0", "Accept": "application/vnd.github+json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        self.http = httpx.AsyncClient(base_url="https://api.github.com", timeout=TIMEOUT, transport=transport,
+                                      headers=headers, follow_redirects=True)
 
     async def fetch(self, canonical_url: str) -> dict:
-        raise NotImplementedError  # #18
+        repo = urlsplit(canonical_url).path
+        r = await _get(self.http, "GitHub", f"/repos{repo}")
+        if r.status_code == 404:
+            raise UpstreamError(f"GitHub repository not found: {canonical_url}")
+        if r.status_code != 200:
+            raise UpstreamError(f"GitHub returned {r.status_code}")
+        meta = r.json()
+        # Accept must be explicit: without it the README comes back as base64 JSON.
+        readme = await _get(self.http, "GitHub", f"/repos{repo}/readme",
+                            headers={"Accept": "application/vnd.github.raw+json"})
+        if readme.status_code not in (200, 404):
+            raise UpstreamError(f"GitHub returned {readme.status_code}")
+        text = readme.text if readme.status_code == 200 else (meta.get("description") or meta["full_name"])
+        return {"title": meta["full_name"], "full_text": text, "published_at": _date(meta.get("created_at"))}
 
 
 class HuggingFaceClient:
+    def __init__(self, token: str = "", *, transport=None):
+        headers = {"User-Agent": "VeilleFacile/1.0"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        self.http = httpx.AsyncClient(base_url="https://huggingface.co", timeout=TIMEOUT, transport=transport,
+                                      headers=headers, follow_redirects=True)
+
     async def fetch(self, canonical_url: str) -> dict:
-        raise NotImplementedError  # #18
+        path = urlsplit(canonical_url).path  # /ns/name, /datasets/ns/name or /spaces/ns/name
+        kind, _, rest = path.lstrip("/").partition("/")
+        kind, rest = (kind, rest) if kind in ("datasets", "spaces") else ("models", path.lstrip("/"))
+        r = await _get(self.http, "Hugging Face", f"/api/{kind}/{rest}")
+        if r.status_code in (401, 404):  # HF answers 401 for missing repos: private and missing look the same
+            raise UpstreamError(f"Hugging Face repository not found or not accessible: {canonical_url}")
+        if r.status_code != 200:
+            raise UpstreamError(f"Hugging Face returned {r.status_code}")
+        meta = r.json()
+        prefix = "" if kind == "models" else f"/{kind}"
+        readme = await _get(self.http, "Hugging Face", f"{prefix}/{meta.get('id', rest)}/raw/main/README.md")
+        # a missing or gated README (401/404) is not fatal: index the title alone
+        text = readme.text if readme.status_code == 200 else meta.get("id", rest)
+        return {"title": meta.get("id", rest), "full_text": text,
+                "published_at": _date(meta.get("createdAt") or meta.get("lastModified"))}

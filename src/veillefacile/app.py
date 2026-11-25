@@ -37,7 +37,7 @@ def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=No
     app.state.settings = settings
     app.state.llm = llm or OpenRouterClient(settings.openrouter_api_key, settings.summary_model, settings.embedding_model)
     app.state.github = github or GitHubClient(settings.github_token)
-    app.state.hf = hf or HuggingFaceClient()
+    app.state.hf = hf or HuggingFaceClient(settings.hf_token)
 
     app.state.repo = SourceRepository(settings.database_url)
     app.state.ingestion = IngestionService(
