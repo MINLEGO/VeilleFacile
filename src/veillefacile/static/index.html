@@ -183,7 +183,7 @@ async function renderDetail() {
 
 $("results").onclick = e => { const i = e.target.closest(".item"); if (i) openSource(+i.dataset.id); };
 $("sites").onclick = e => { const a = e.target.closest("a"); if (a) { state.site = state.site === a.dataset.site ? "" : a.dataset.site; renderSites(); search(); } };
-let timer; for (const id of ["q", "kw"]) $(id).oninput = () => { clearTimeout(timer); timer = setTimeout(search, 300); };
+for (const id of ["q", "kw"]) $(id).onkeydown = e => { if (e.key === "Enter") search(); };  // each search may cost an embedding call
 $("mode").onchange = search;
 $("key").value = store.get();
 $("key").onchange = () => { store.set($("key").value.trim()); search(); };

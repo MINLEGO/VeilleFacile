@@ -19,6 +19,7 @@ class FakeLLM:
     def __init__(self):
         self.fail: Exception | None = None  # set to simulate outages (timeout, quota...)
         self.summarize_calls = 0
+        self.embedded: list[str] = []  # every text sent to embed
         self.keywords = ["fake"]  # what summarize "generates"
 
     async def summarize(self, text: str, *, title: str = "", url: str = "", site: str = "") -> tuple[str, list[str]]:
@@ -31,6 +32,7 @@ class FakeLLM:
     async def embed(self, texts: list[str]) -> list[list[float]]:
         if self.fail:
             raise self.fail
+        self.embedded += texts
         return [fake_embedding(t) for t in texts]
 
 
