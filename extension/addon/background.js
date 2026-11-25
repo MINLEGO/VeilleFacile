@@ -12,6 +12,7 @@ const fail = (error, action) => ({ status: "error", error, action });
 const EXTRACTOR_FILES = {
   readability: ["vendor/Readability.js", "extractors/readability.js"],
   academic: ["extractors/academic.js"],
+  youtube: ["extractors/youtube.js"], // ends with a Promise: executeScript awaits it
 };
 
 const inject = async (tabId, files) => (await browser.scripting.executeScript({ target: { tabId }, files }))[0].result;
@@ -25,8 +26,9 @@ async function extract(tabId, url) {
     }))[0].result;
     const decision = route(url, { hasCitationAbstract });
     const r = await inject(tabId, EXTRACTOR_FILES[decision.extractor]);
+    if (r.notLoaded) return { fail: fail("Page pas encore chargée, réessayer", "reextract") };
     if (!r.full_text?.trim()) return { fail: fail("Aucun texte extrait") };
-    return { payload: { title: r.title, full_text: r.full_text, ...(r.published_at && { published_at: r.published_at }) } };
+    return { payload: { title: r.title, full_text: r.full_text, ...(r.published_at && { published_at: r.published_at }) }, warnings: r.warnings };
   } catch {
     return { fail: fail("Page non capturable") };
   }
@@ -39,19 +41,20 @@ async function send(tabId, url) {
 
   const decision = route(url);
   if (decision.action === "refuse") return fail(decision.reason);
-  let extra = {};
+  let extra = {}, warnings = [];
   if (decision.action === "extract") {
     const e = await extract(tabId, url);
     if (e.fail) return e.fail;
     extra = e.payload;
+    warnings = e.warnings || [];
   }
 
-  return post(tabId, { url, ...extra });
+  return post(tabId, { url, ...extra }, warnings);
 }
 
-// Stores the payload so Retry can resend it without re-extracting.
-async function post(tabId, payload) {
-  await browser.storage.session.set({ [`payload:${tabId}`]: payload });
+// Stores the payload (and its extraction warnings) so Retry can resend it without re-extracting.
+async function post(tabId, payload, warnings = []) {
+  await browser.storage.session.set({ [`payload:${tabId}`]: { payload, warnings } });
   const { backendUrl, apiKey } = await browser.storage.local.get(["backendUrl", "apiKey"]);
   let resp;
   try {
@@ -67,7 +70,7 @@ async function post(tabId, payload) {
     const body = await resp.json().catch(() => ({}));
     return { status: "error", ...describeFailure({ status: resp.status, detail: body.detail, retryAfter: resp.headers.get("Retry-After") }) };
   }
-  return { status: "ok", created: resp.status === 201, source: await resp.json() };
+  return { status: "ok", created: resp.status === 201, source: await resp.json(), warnings };
 }
 
 async function capture(tab) {
@@ -77,9 +80,9 @@ async function capture(tab) {
 
 async function retry(tabId) {
   const key = `payload:${tabId}`;
-  const payload = (await browser.storage.session.get(key))[key];
+  const { payload, warnings } = (await browser.storage.session.get(key))[key];
   await setResult(tabId, { status: "pending", step: "envoi" });
-  await setResult(tabId, await post(tabId, payload));
+  await setResult(tabId, await post(tabId, payload, warnings));
 }
 
 // A new page in the tab invalidates its stored result.

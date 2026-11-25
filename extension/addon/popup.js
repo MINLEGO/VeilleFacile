@@ -1,4 +1,4 @@
-let tabId;
+let tabId, tabUrl;
 const root = document.getElementById("root");
 const el = (tag, text, cls) => Object.assign(document.createElement(tag), { textContent: text, className: cls || "" });
 
@@ -12,9 +12,10 @@ function render(r) {
       b.onclick = () => browser.runtime.openOptionsPage();
       root.append(b);
     }
-    if (r.action === "retry") {
+    if (r.action === "retry" || r.action === "reextract") {
       const b = el("button", "Réessayer");
-      b.onclick = () => browser.runtime.sendMessage({ type: "retry", tab: { id: tabId } });
+      // reextract = page not loaded yet: redo the whole capture, not just the POST
+      b.onclick = () => browser.runtime.sendMessage(r.action === "retry" ? { type: "retry", tab: { id: tabId } } : { type: "capture", tab: { id: tabId, url: tabUrl } });
       root.append(b);
     }
     return;
@@ -22,11 +23,13 @@ function render(r) {
   const s = r.source;
   root.append(el("h2", r.created ? "Ajoutée" : "Mise à jour"), el("strong", s.title || s.url), el("p", s.origin_site, "muted"), el("p", s.summary || ""));
   if (s.keywords?.length) root.append(el("p", s.keywords.join(", "), "muted"));
+  for (const w of r.warnings || []) root.append(el("p", `Avertissement : ${w}`, "muted"));
 }
 
 (async () => {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   tabId = tab.id;
+  tabUrl = tab.url;
   const key = `result:${tab.id}`;
   browser.storage.onChanged.addListener((ch) => ch[key] && render(ch[key].newValue));
   // Reopening shows the last result; a new send happens only when none is stored (shortcut: no resend button yet).
