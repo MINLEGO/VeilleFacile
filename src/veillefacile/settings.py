@@ -22,6 +22,10 @@ class Settings:
     skip_migrations: bool = False  # tests only
     skip_model_check: bool = False  # tests only: no OpenRouter model list lookup at startup
 
+    @property
+    def summary_models(self) -> list[str]:
+        return [m.strip() for m in self.summary_model.split(",") if m.strip()]
+
     @classmethod
     def from_env(cls) -> "Settings":
         e = os.environ
@@ -32,7 +36,8 @@ class Settings:
             openrouter_api_key=e.get("OPENROUTER_API_KEY", ""),
             github_token=e.get("GITHUB_TOKEN", ""),
             hf_token=e.get("HF_TOKEN", ""),
-            mcp_disabled_tools=e.get("MCP_DISABLED_TOOLS", d.mcp_disabled_tools),
-            embedding_model=e.get("EMBEDDING_MODEL", d.embedding_model),
-            summary_model=e.get("SUMMARY_MODEL", d.summary_model),
+            # `or`: .env.example ships these blank, and blank means "use the default"
+            mcp_disabled_tools=e.get("MCP_DISABLED_TOOLS") or d.mcp_disabled_tools,
+            embedding_model=e.get("EMBEDDING_MODEL") or d.embedding_model,
+            summary_model=e.get("SUMMARY_MODEL") or d.summary_model,
         )

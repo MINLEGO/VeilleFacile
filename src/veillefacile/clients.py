@@ -1,4 +1,5 @@
 """Narrow interfaces to external services. Tests inject fakes."""
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -78,18 +79,21 @@ def parse_summary(out: str) -> tuple[str, list[str]]:
 
 
 class OpenRouterClient:
-    def __init__(self, api_key: str, summary_model: str, embedding_model: str, *, transport=None):
+    def __init__(self, api_key: str, summary_model: str, embedding_model: str, *, transport=None,
+                 timeout: float = TIMEOUT):
         self.summary_models = [m.strip() for m in summary_model.split(",") if m.strip()]
         self.embedding_model = embedding_model
-        self.http = httpx.AsyncClient(base_url=OPENROUTER, timeout=TIMEOUT, transport=transport,
+        self.timeout = timeout  # total cap per call; httpx's own timeout is per phase
+        self.http = httpx.AsyncClient(base_url=OPENROUTER, timeout=timeout, transport=transport,
                                       headers={"Authorization": f"Bearer {api_key}"})
 
     async def _post(self, path: str, body: dict) -> dict:
         try:
-            r = await self.http.post(path, json=body)
-        except httpx.HTTPError as e:  # timeouts and network errors
+            async with asyncio.timeout(self.timeout):
+                r = await self.http.post(path, json=body)
+        except (httpx.HTTPError, TimeoutError) as e:  # timeouts and network errors
             raise UpstreamError(f"OpenRouter unreachable: {type(e).__name__}") from e
-        if r.status_code == 429:
+        if r.status_code in (429, 402):  # 402: credits exhausted
             ra = r.headers.get("Retry-After", "")
             raise QuotaError(int(ra) if ra.isdigit() else 60)
         if r.status_code != 200:

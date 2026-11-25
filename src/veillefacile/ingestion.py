@@ -1,5 +1,6 @@
 """Ingestion service: orchestrates canonicalisation, fetch seam, LLM, keywords, embedding and persistence.
 All external calls happen before the single write, so a failure leaves nothing behind (all-or-nothing)."""
+import asyncio
 from datetime import datetime
 from typing import Literal
 
@@ -36,7 +37,7 @@ class IngestionService:
                      keywords_mode: Literal["append", "replace"] = "append") -> tuple[dict, bool]:
         """-> (source row, created). Raises CaptureRequired, UpstreamError, QuotaError."""
         canonical, site = canonicalize(url)
-        existing = self.repo.get_by_canonical(canonical)
+        existing = await asyncio.to_thread(self.repo.get_by_canonical, canonical)  # psycopg blocks: off the loop
         mode = "capture"
         if full_text is None:
             fetcher = self.fetchers.get(site)
@@ -64,26 +65,29 @@ class IngestionService:
         row = {"url": url, "canonical_url": canonical, "origin_site": site, "title": title, "summary": summary,
                "generated_keywords": k.generated, "manual_keywords": k.manual, "rejected_keywords": k.rejected,
                "full_text": full_text, "ingest_mode": mode, "published_at": published_at}
-        return self.repo.upsert(row, text, embedding, self.embedding_model)
+        return await asyncio.to_thread(self.repo.upsert, row, text, embedding, self.embedding_model)
 
     async def edit(self, source_id: int, *, title: str | None = None, summary: str | None = None,
                    keywords: list[str] | None = None, add_keywords: list[str] = (),
                    remove_keywords: list[str] = ()) -> dict | None:
         """Manual correction (PATCH, no summary LLM call): applies keywords replace, then add, then remove;
-        re-embeds and re-indexes. -> updated row, None if absent."""
-        row = self.repo.get(source_id)
+        re-embeds and re-indexes only if title, summary or effective keywords changed. -> updated row, None if absent."""
+        row = await asyncio.to_thread(self.repo.get, source_id)
         if row is None:
             return None
         title = title or row["title"]
         summary = summary if summary is not None else row["summary"]
-        k = keywords_of(row)
+        old = keywords_of(row)
+        k = old
         if keywords is not None:
             k = kw.replace(k, keywords)
         for word in add_keywords:
             k = kw.add(k, word)
         for word in remove_keywords:
             k = kw.remove(k, word)
-        text, embedding = await self.embed_index(title, summary, k)
         fields = {"title": title, "summary": summary, "generated_keywords": k.generated,
                   "manual_keywords": k.manual, "rejected_keywords": k.rejected}
-        return self.repo.update(source_id, fields, text, embedding, self.embedding_model)
+        text = embedding = None
+        if (title, summary, kw.effective(k)) != (row["title"], row["summary"], kw.effective(old)):
+            text, embedding = await self.embed_index(title, summary, k)
+        return await asyncio.to_thread(self.repo.update, source_id, fields, text, embedding, self.embedding_model)

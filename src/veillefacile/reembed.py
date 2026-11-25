@@ -35,7 +35,7 @@ async def reembed(repo: SourceRepository, llm, model: str, *, confirm=input, out
         while rows := repo.stale_batch(model, EMBED_BATCH):
             texts = [index_text(r["title"], r["summary"], kw.effective(keywords_of(r))) for r in rows]
             for r, text, emb in zip(rows, texts, await llm.embed(texts)):
-                repo.update(r["id"], {}, text, emb, model)  # committed per Source; whole batch only after embed
+                repo.update(r["id"], {}, text, emb, model, touch=False)  # committed per Source; whole batch only after embed
             done += len(rows)
             out(f"{done}/{total}")
     except (UpstreamError, QuotaError) as e:
@@ -56,27 +56,31 @@ async def fetch_models() -> list[dict]:
         raise UpstreamError("OpenRouter model list unavailable") from e
 
 
-async def check_model(fetch, model: str) -> list[str]:
-    """-> warnings: configured model absent from the list, or with an expiration_date. Unreachable list: ignored."""
+async def check_models(fetch, models: list[str]) -> list[str]:
+    """-> warnings: configured models (embedding and summary) absent from the list, or with an expiration_date.
+    Unreachable list: ignored."""
     try:
         listing = await fetch()
     except UpstreamError:
         return []
-    found = next((m for m in listing if m.get("id") == model), None)
-    if found is None:
-        warning = f"Embedding model {model} is absent from the OpenRouter model list"
-    elif found.get("expiration_date"):
-        warning = f"Embedding model {model} expires on {found['expiration_date']}"
-    else:
-        return []
-    log.warning(warning)
-    return [warning]
+    by_id = {m.get("id"): m for m in listing}
+    warnings = []
+    for model in models:
+        found = by_id.get(model)
+        if found is None:
+            warnings.append(f"Model {model} is absent from the OpenRouter model list")
+        elif found.get("expiration_date"):
+            warnings.append(f"Model {model} expires on {found['expiration_date']}")
+    for w in warnings:
+        log.warning(w)
+    return warnings
 
 
-def main() -> int:
-    s = Settings.from_env()
-    llm = OpenRouterClient(s.openrouter_api_key, s.summary_model, s.embedding_model)
-    return asyncio.run(reembed(SourceRepository(s.database_url), llm, s.embedding_model))
+def main(settings: Settings | None = None, llm=None, *, confirm=input, out=print) -> int:
+    """Command entry point; settings / llm / confirm / out are injectable for tests."""
+    s = settings or Settings.from_env()
+    llm = llm or OpenRouterClient(s.openrouter_api_key, s.summary_model, s.embedding_model)
+    return asyncio.run(reembed(SourceRepository(s.database_url), llm, s.embedding_model, confirm=confirm, out=out))
 
 
 if __name__ == "__main__":

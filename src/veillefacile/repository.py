@@ -40,14 +40,16 @@ class SourceRepository:
         return stored, stored.pop("created")
 
     def update(self, source_id: int, fields: dict, index_text: str | None = None, embedding: list[float] | None = None,
-               embedding_model: str | None = None) -> dict | None:
+               embedding_model: str | None = None, touch: bool = True) -> dict | None:
         """Update plain columns (title, summary, *_keywords); with index_text+embedding also refreshes tsvector and
-        embedding. Returns the row, or None if absent."""
+        embedding. touch=False leaves updated_at alone (re-embedding is not an edit). Returns the row, or None."""
         sets, params = [f"{c} = %s" for c in fields], list(fields.values())
         if index_text is not None:
             sets += ["search_text = to_tsvector('english', %s)", "embedding = %s::vector", "embedding_model = %s"]
             params += [index_text, vector_literal(embedding), embedding_model]
-        return self._one(f"UPDATE sources SET {', '.join(sets)}, updated_at = now() WHERE id = %s "
+        if touch:
+            sets.append("updated_at = now()")
+        return self._one(f"UPDATE sources SET {', '.join(sets)} WHERE id = %s "
                          f"RETURNING {COLUMNS}", params + [source_id])
 
     def count_stale(self, embedding_model: str) -> int:

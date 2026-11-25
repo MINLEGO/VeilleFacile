@@ -30,10 +30,8 @@ def effective(k: Keywords) -> list[str]:
 
 
 def remove(k: Keywords, word: str) -> Keywords:
-    """Leaves manual; a generated one goes to rejected so regeneration doesn't bring it back."""
-    is_generated = word.lower() in {g.lower() for g in k.generated}
-    rejected = _dedupe(k.rejected + [word]) if is_generated else k.rejected
-    return _replace(k, manual=_without(k.manual, [word]), rejected=rejected)
+    """Leaves manual and always enters rejected, so regeneration doesn't bring it back."""
+    return _replace(k, manual=_without(k.manual, [word]), rejected=_dedupe(k.rejected + [word]))
 
 
 def add(k: Keywords, word: str) -> Keywords:

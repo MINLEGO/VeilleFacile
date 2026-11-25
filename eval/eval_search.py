@@ -118,8 +118,12 @@ def run_eval(items, base_url, fetch, modes=MODES, limit=5):
     for mode in modes:
         typed_scores, warnings = [], []
         for item in items:
-            data = fetch(search_url(base_url, item["query"], mode, limit))
-            ranked = [r["canonical_url"] for r in data["results"]]
+            try:
+                data = fetch(search_url(base_url, item["query"], mode, limit))
+                ranked = [r["canonical_url"] for r in data["results"]]
+            except (OSError, ValueError, KeyError) as e:  # URLError/HTTPError are OSError; a failed query is a miss
+                warnings.append(f"[{mode}] {item['query']!r}: request failed ({e}); counted as a miss")
+                ranked = []
             score = score_query(ranked, item["expected"], k=limit)
             for url in score["missing"]:
                 warnings.append(f"[{mode}] {item['query']!r}: expected Source not in top {limit}: {url}")
