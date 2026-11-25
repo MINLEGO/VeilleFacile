@@ -37,6 +37,18 @@
   .summary ul { padding-left:18px; }
   .fulltext { white-space:pre-wrap; font:12px/1.5 ui-monospace, Consolas, monospace; border:1px solid var(--line); border-radius:6px; padding:10px; }
   .row { display:flex; gap:6px; align-items:center; margin:6px 0; }
+  /* tablet: filters + results side by side, detail below */
+  @media (max-width:1000px) {
+    #grid, #grid.hasbanner { grid-template-columns:220px 1fr; height:auto; }
+    #grid > div { max-height:70vh; }
+    #grid > .detail { grid-column:1 / -1; max-height:none; border-top:1px solid var(--line); }
+  }
+  /* phone: one column, page scrolls */
+  @media (max-width:640px) {
+    #grid, #grid.hasbanner { grid-template-columns:1fr; }
+    #grid > div { max-height:none; border-right:0; border-bottom:1px solid var(--line); }
+    input, select, textarea, button { font-size:16px; } /* stops iOS zoom on focus */
+  }
 </style>
 </head>
 <body>
@@ -125,6 +137,7 @@ function renderSites() {
 async function openSource(id) {
   state.sel = id; state.textStart = 0; state.editing = false;
   await renderDetail();
+  if (innerWidth <= 1000) $("detail").scrollIntoView({ behavior: "smooth" });  // detail sits below the list
   search();
 }
 
