@@ -50,6 +50,15 @@ class SourceRepository:
         return self._one(f"UPDATE sources SET {', '.join(sets)}, updated_at = now() WHERE id = %s "
                          f"RETURNING {COLUMNS}", params + [source_id])
 
+    def count_stale(self, embedding_model: str) -> int:
+        return self._one("SELECT count(*) AS n FROM sources WHERE embedding_model IS DISTINCT FROM %s",
+                         (embedding_model,))["n"]
+
+    def stale_batch(self, embedding_model: str, limit: int) -> list[dict]:
+        with psycopg.connect(self.database_url, row_factory=dict_row) as conn:
+            return conn.execute(f"SELECT {COLUMNS} FROM sources WHERE embedding_model IS DISTINCT FROM %s "
+                                f"ORDER BY id LIMIT %s", (embedding_model, limit)).fetchall()
+
     def text_slice(self, source_id: int, start: int, length: int | None) -> dict | None:
         """-> {"text", "start", "total_length"} (length None = to the end)."""
         return self._one("SELECT substr(full_text, %s, coalesce(%s, length(full_text))) AS text, %s::int AS start, length(full_text) AS total_length "

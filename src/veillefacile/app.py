@@ -1,4 +1,5 @@
 import secrets
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 import psycopg
@@ -6,12 +7,13 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Respons
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .clients import GitHubClient, HuggingFaceClient, OpenRouterClient
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from .db import migrate
 from .errors import CaptureRequired, QuotaError, UpstreamError
 from .ingestion import IngestionService
 from .mcp_server import build_mcp, mount_mcp
+from .reembed import check_model, fetch_models
 from .repository import SourceRepository
 from .routes import sources
 from .settings import Settings
@@ -25,13 +27,16 @@ def require_key(request: Request, creds: HTTPAuthorizationCredentials | None = D
         raise HTTPException(401, "Invalid or missing API key", headers={"WWW-Authenticate": "Bearer"})
 
 
-def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=None, models=None) -> FastAPI:
+    """models: async callable returning OpenRouter's public model list (injectable; startup check)."""
     settings = settings or Settings.from_env()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if not settings.skip_migrations:
             migrate(settings.database_url, settings.migrations_dir)
+        fetch = models or (None if settings.skip_model_check else fetch_models)
+        app.state.warnings = await check_model(fetch, settings.embedding_model) if fetch else []
         async with mcp.session_manager.run():
             yield
 
@@ -67,11 +72,12 @@ def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=No
     def health(response: Response):
         try:
             with psycopg.connect(settings.database_url, connect_timeout=3) as conn:
-                conn.execute("SELECT 1")
+                stale = conn.execute("SELECT count(*) FROM sources WHERE embedding_model IS DISTINCT FROM %s",
+                                     (settings.embedding_model,)).fetchone()[0]
         except psycopg.Error:
             response.status_code = 503
             return {"status": "unavailable"}
-        return {"status": "ok"}
+        return {"status": "ok", "stale_sources": stale, "warnings": app.state.warnings}
 
     # Every other /api route goes on this router (add routes before include_router): it enforces the Bearer key.
     protected = APIRouter(prefix="/api", dependencies=[Depends(require_key)])
@@ -85,4 +91,9 @@ def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=No
     app.include_router(api)
     app.include_router(protected)
     mount_mcp(app, mcp)
+
+    @app.get("/", include_in_schema=False)
+    def ui():
+        return FileResponse(Path(__file__).parent / "static" / "index.html")
+
     return app
