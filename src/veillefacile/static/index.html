@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VeilleFacile</title>
+<style>
+  :root { --bg:#f7f7f5; --fg:#1d1d1f; --muted:#6b6b70; --line:#e2e2df; --acc:#2f5bd3; --danger:#c0392b; --card:#fff; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; background:var(--bg); color:var(--fg); }
+  button, input, select, textarea { font:inherit; }
+  button { cursor:pointer; border:1px solid var(--line); background:#fff; border-radius:6px; padding:5px 10px; }
+  button.primary { background:var(--acc); color:#fff; border-color:var(--acc); }
+  button.danger { color:var(--danger); }
+  input, select, textarea { border:1px solid var(--line); border-radius:6px; padding:6px 8px; background:#fff; width:100%; }
+  .muted { color:var(--muted); font-size:12px; }
+  .err { color:var(--danger); font-size:12px; margin-top:4px; }
+  #banner { background:#fff3cd; color:#664d03; padding:6px 14px; font-size:13px; }
+  #grid { display:grid; grid-template-columns:240px 380px 1fr; height:100vh; }
+  #grid.hasbanner { height:calc(100vh - 31px); }
+  #grid > div { overflow:auto; border-right:1px solid var(--line); padding:14px; }
+  .side label { display:block; margin:10px 0 3px; font-size:12px; color:var(--muted); }
+  .sites a { display:inline-block; margin:2px 4px 2px 0; padding:1px 8px; border-radius:999px; background:#eef1fb; color:var(--acc); cursor:pointer; font-size:12px; }
+  .sites a.on { background:var(--acc); color:#fff; }
+  .item { padding:10px; border-radius:8px; cursor:pointer; margin-bottom:4px; }
+  .item:hover { background:#eeeeea; }
+  .item.sel { background:#eef1fb; }
+  .item .t { font-weight:600; }
+  .detail { background:var(--card); }
+  .tabs button.on { background:var(--fg); color:#fff; }
+  .chip { display:inline-flex; gap:4px; align-items:center; background:#eef1fb; color:#1e3a8a; border-radius:999px; padding:1px 8px; margin:2px; font-size:12px; }
+  .chip.manual { background:#e6f4ea; color:#14532d; }
+  .chip.rejected { background:#f4e6e6; text-decoration:line-through; color:var(--muted); }
+  .chip button { border:0; background:none; padding:0 2px; color:inherit; }
+  .summary h4 { margin:10px 0 2px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  .summary p, .summary ul { margin:2px 0; }
+  .summary ul { padding-left:18px; }
+  .fulltext { white-space:pre-wrap; font:12px/1.5 ui-monospace, Consolas, monospace; border:1px solid var(--line); border-radius:6px; padding:10px; }
+  .row { display:flex; gap:6px; align-items:center; margin:6px 0; }
+</style>
+</head>
+<body>
+<div id="banner" hidden>Recherche sémantique indisponible : résultats limités à la recherche textuelle.</div>
+<div id="grid">
+  <div class="side">
+    <h3 style="margin:0 0 8px">VeilleFacile</h3>
+    <label>Clé API</label>
+    <div class="row"><input id="key" type="password" placeholder="Clé API"><button id="forget" title="Oublier la clé">Oublier</button></div>
+    <label>Recherche</label>
+    <input id="q" placeholder="Rechercher…">
+    <label>Mode</label>
+    <select id="mode"><option value="hybrid">Hybride</option><option value="semantic">Sémantique</option><option value="text">Texte</option></select>
+    <label>Sites d'origine</label>
+    <div id="sites" class="sites muted">—</div>
+    <label>Mot-clé exigé (séparés par des virgules)</label>
+    <input id="kw" placeholder="ex. Qwen3, vLLM">
+    <label>Ajouter une URL (GitHub / Hugging Face)</label>
+    <input id="url" placeholder="https://github.com/…">
+    <div class="row"><button id="add" class="primary">Ajouter</button><span id="addmsg" class="muted"></span></div>
+    <div id="adderr" class="err"></div>
+  </div>
+  <div id="results"><span class="muted">Chargement…</span></div>
+  <div class="detail" id="detail"><span class="muted">Sélectionnez une Source.</span></div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const lc = s => s.toLowerCase();
+const state = { site: "", sel: null, tab: "summary", textStart: 0, editing: false, seen: new Set() };
+const SLICE = 5000;
+const store = { get: () => { try { return localStorage.getItem("vf_key") || ""; } catch { return ""; } },
+                set: v => { try { v ? localStorage.setItem("vf_key", v) : localStorage.removeItem("vf_key"); } catch {} } };
+
+async function api(path, opts = {}) {
+  const r = await fetch("/api" + path, { ...opts, headers: { Authorization: "Bearer " + store.get(),
+    ...(opts.body ? { "Content-Type": "application/json" } : {}) } });
+  if (!r.ok) {
+    let d = r.statusText;
+    try { const j = await r.json(); d = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail); } catch {}
+    throw new Error(`${r.status} : ${d}`);
+  }
+  return r.status === 204 ? null : r.json();
+}
+
+// Minimal markdown: headings, lists, paragraphs. HTML is escaped first.
+function md(src) {
+  let out = "", inList = false;
+  for (const line of esc(src).split("\n")) {
+    const li = line.match(/^\s*[-*]\s+(.*)/), h = line.match(/^#{1,6}\s+(.*)/);
+    if (inList && !li) { out += "</ul>"; inList = false; }
+    if (li) { if (!inList) { out += "<ul>"; inList = true; } out += `<li>${li[1]}</li>`; }
+    else if (h) out += `<h4>${h[1]}</h4>`;
+    else if (line.trim()) out += `<p>${line}</p>`;
+  }
+  return out + (inList ? "</ul>" : "");
+}
+const intro = s => { const m = (s || "").match(/## What it is\s*\n([\s\S]*?)(\n## |$)/); return (m ? m[1] : s || "").trim().slice(0, 200); };
+const fmtDate = d => d ? new Date(d).toLocaleDateString("fr-FR") : "";
+
+async function search() {
+  const p = new URLSearchParams({ mode: $("mode").value });
+  if ($("q").value.trim()) p.set("q", $("q").value.trim());
+  if (state.site) p.set("site", state.site);
+  $("kw").value.split(",").map(k => k.trim()).filter(Boolean).forEach(k => p.append("keywords", k));
+  try {
+    const r = await api("/sources?" + p);
+    $("banner").hidden = !r.degraded;
+    $("grid").classList.toggle("hasbanner", !!r.degraded);
+    r.results.forEach(s => state.seen.add(s.origin_site));
+    renderSites();
+    $("results").innerHTML = r.results.length ? r.results.map(s => `
+      <div class="item ${s.id === state.sel ? "sel" : ""}" data-id="${s.id}">
+        <div class="t">${esc(s.title)}</div>
+        <div class="muted">${esc(s.origin_site)} · ${fmtDate(s.published_at)}${s.score != null ? " · score " + s.score.toFixed(3) : ""}</div>
+        <div class="muted">${esc(intro(s.summary))}</div>
+      </div>`).join("") : `<span class="muted">Aucun résultat.</span>`;
+  } catch (e) { $("results").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+
+function renderSites() {
+  $("sites").innerHTML = [...state.seen].sort().map(s =>
+    `<a data-site="${esc(s)}" class="${s === state.site ? "on" : ""}">${esc(s)}</a>`).join("") || "—";
+}
+
+async function openSource(id) {
+  state.sel = id; state.textStart = 0; state.editing = false;
+  await renderDetail();
+  search();
+}
+
+function chips(s) {
+  const rej = new Set(s.rejected_keywords.map(lc)), man = new Set(s.manual_keywords.map(lc));
+  const gen = s.generated_keywords.filter(k => !rej.has(lc(k)) && !man.has(lc(k)));
+  const c = (k, cls, act, sym) => `<span class="chip ${cls}">${esc(k)}<button data-kw="${esc(k)}" data-act="${act}" title="${act === "add" ? "Rétablir" : "Retirer"}">${sym}</button></span>`;
+  return gen.map(k => c(k, "", "remove", "×")).join("") + s.manual_keywords.map(k => c(k, "manual", "remove", "×")).join("")
+    + s.rejected_keywords.map(k => c(k, "rejected", "add", "↺")).join("");
+}
+
+async function renderDetail() {
+  if (state.sel == null) { $("detail").innerHTML = `<span class="muted">Sélectionnez une Source.</span>`; return; }
+  let s;
+  try { s = await api("/sources/" + state.sel); } catch (e) { $("detail").innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  let body;
+  if (state.tab === "summary") {
+    body = state.editing
+      ? `<textarea id="sumedit" rows="14">${esc(s.summary)}</textarea><div class="row"><button class="primary" id="sumsave">Enregistrer</button><button id="sumcancel">Annuler</button></div>`
+      : `<div class="summary">${md(s.summary)}</div><button id="sumbtn">Modifier le Résumé</button>`;
+    body += `<h4 class="muted" style="margin:14px 0 2px">MOTS-CLÉS</h4><div id="chips">${chips(s)}</div>
+      <div class="row"><input id="newkw" placeholder="Ajouter un Mot-clé"><button id="kwadd">Ajouter</button></div>`;
+  } else {
+    const t = await api(`/sources/${s.id}/text?start=${state.textStart}&length=${SLICE}`);
+    const end = t.start + t.text.length;
+    body = `<div class="row muted"><button id="prev" ${t.start <= 0 ? "disabled" : ""}>←</button>${t.start}–${end} / ${t.total_length}
+      <button id="next" ${end >= t.total_length ? "disabled" : ""}>→</button></div><div class="fulltext">${esc(t.text)}</div>`;
+  }
+  $("detail").innerHTML = `
+    <div class="row"><b id="title" style="font-size:16px;flex:1">${esc(s.title)}</b><button id="titlebtn">Renommer</button>
+      <button class="danger" id="del">Supprimer</button></div>
+    <div class="muted"><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a> · ${esc(s.origin_site)}</div>
+    <div class="tabs row"><button data-tab="summary" class="${state.tab === "summary" ? "on" : ""}">Résumé</button>
+      <button data-tab="text" class="${state.tab === "text" ? "on" : ""}">Texte intégral</button></div>
+    <div id="derr" class="err"></div>${body}`;
+  const patch = async b => { try { await api("/sources/" + s.id, { method: "PATCH", body: JSON.stringify(b) }); state.editing = false; await renderDetail(); search(); }
+    catch (e) { $("derr").textContent = e.message; } };
+  $("titlebtn").onclick = () => { const t = prompt("Nouveau titre", s.title); if (t && t.trim()) patch({ title: t.trim() }); };
+  $("del").onclick = async () => {
+    if (!confirm(`Supprimer « ${s.title} » ? Cette action est irréversible.`)) return;
+    try { await api("/sources/" + s.id, { method: "DELETE" }); state.sel = null; renderDetail(); search(); }
+    catch (e) { $("derr").textContent = e.message; }
+  };
+  document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { state.tab = b.dataset.tab; state.textStart = 0; renderDetail(); });
+  if (state.tab === "summary") {
+    if ($("sumbtn")) $("sumbtn").onclick = () => { state.editing = true; renderDetail(); };
+    if ($("sumcancel")) $("sumcancel").onclick = () => { state.editing = false; renderDetail(); };
+    if ($("sumsave")) $("sumsave").onclick = () => patch({ summary: $("sumedit").value });
+    $("chips").onclick = e => { const b = e.target.closest("button"); if (b) patch(b.dataset.act === "add" ? { add_keywords: [b.dataset.kw] } : { remove_keywords: [b.dataset.kw] }); };
+    $("kwadd").onclick = () => { const k = $("newkw").value.trim(); if (k) patch({ add_keywords: [k] }); };
+  } else {
+    if ($("prev")) $("prev").onclick = () => { state.textStart = Math.max(0, state.textStart - SLICE); renderDetail(); };
+    if ($("next")) $("next").onclick = () => { state.textStart += SLICE; renderDetail(); };
+  }
+}
+
+$("results").onclick = e => { const i = e.target.closest(".item"); if (i) openSource(+i.dataset.id); };
+$("sites").onclick = e => { const a = e.target.closest("a"); if (a) { state.site = state.site === a.dataset.site ? "" : a.dataset.site; renderSites(); search(); } };
+let timer; for (const id of ["q", "kw"]) $(id).oninput = () => { clearTimeout(timer); timer = setTimeout(search, 300); };
+$("mode").onchange = search;
+$("key").value = store.get();
+$("key").onchange = () => { store.set($("key").value.trim()); search(); };
+$("forget").onclick = () => { store.set(""); $("key").value = ""; };
+$("add").onclick = async () => {
+  const url = $("url").value.trim(); if (!url) return;
+  $("adderr").textContent = ""; $("addmsg").textContent = "Récupération en cours, patientez…"; $("add").disabled = true;
+  try { const s = await api("/sources", { method: "POST", body: JSON.stringify({ url }) }); $("url").value = ""; await search(); openSource(s.id); }
+  catch (e) { $("adderr").textContent = e.message; }
+  $("addmsg").textContent = ""; $("add").disabled = false;
+};
+search();
+</script>
+</body>
+</html>

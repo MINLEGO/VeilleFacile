@@ -1,4 +1,5 @@
 import secrets
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 import psycopg
@@ -6,7 +7,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Respons
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .clients import GitHubClient, HuggingFaceClient, OpenRouterClient
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from .db import migrate
 from .errors import CaptureRequired, QuotaError, UpstreamError
@@ -85,4 +86,9 @@ def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=No
 
     app.include_router(api)
     app.include_router(protected)
+
+    @app.get("/", include_in_schema=False)
+    def ui():
+        return FileResponse(Path(__file__).parent / "static" / "index.html")
+
     return app
