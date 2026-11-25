@@ -1,11 +1,12 @@
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from ..ingestion import keywords_of
 from ..keywords import effective
+from ..search import SemanticUnavailable, search_sources
 
 router = APIRouter(prefix="/sources")
 
@@ -32,6 +33,21 @@ async def create_source(body: SourceIn, request: Request, response: Response):
     row, created = await request.app.state.ingestion.ingest(**body.model_dump())
     response.status_code = 201 if created else 200
     return source_out(row)
+
+
+@router.get("")
+async def search(request: Request, q: str | None = None, mode: Literal["hybrid", "semantic", "text"] = "hybrid",
+                 site: str | None = None, keywords: list[str] = Query(default=[]),
+                 published_after: datetime | None = None, published_before: datetime | None = None,
+                 limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)):
+    s = request.app.state
+    try:
+        rows, degraded = await search_sources(
+            s.repo, s.llm, s.settings.embedding_model, q=q, mode=mode, site=site, keywords=keywords,
+            published_after=published_after, published_before=published_before, limit=limit, offset=offset)
+    except SemanticUnavailable:
+        raise HTTPException(503, "Embedding model unavailable")
+    return {"results": [source_out(r) for r in rows], "degraded": degraded, "limit": limit, "offset": offset}
 
 
 @router.get("/{source_id}")
