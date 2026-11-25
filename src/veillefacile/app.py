@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 import psycopg
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .auth import valid_key
@@ -21,10 +22,20 @@ from .settings import Settings
 _bearer = HTTPBearer(auto_error=False)
 
 
+_READ_METHODS = {"GET", "HEAD"}
+
+
 def require_key(request: Request, creds: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> None:
-    key = request.app.state.settings.api_key
-    if not valid_key(creds and creds.credentials, key):
-        raise HTTPException(401, "Invalid or missing API key", headers={"WWW-Authenticate": "Bearer"})
+    """API_KEY grants everything; READ_API_KEY (if set) grants read-only (GET/HEAD) routes only."""
+    s = request.app.state.settings
+    token = creds and creds.credentials
+    if valid_key(token, s.api_key):
+        return
+    if s.read_api_key and valid_key(token, s.read_api_key):
+        if request.method in _READ_METHODS:
+            return
+        raise HTTPException(403, "Read-only API key")
+    raise HTTPException(401, "Invalid or missing API key", headers={"WWW-Authenticate": "Bearer"})
 
 
 def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=None, models=None) -> FastAPI:
@@ -42,6 +53,9 @@ def create_app(settings: Settings | None = None, *, llm=None, github=None, hf=No
 
     app = FastAPI(lifespan=lifespan)
     app.state.settings = settings
+    if origins := [o.strip() for o in settings.cors_origins.split(",") if o.strip()]:
+        app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET"],
+                           allow_headers=["Authorization"])
     app.state.llm = llm or OpenRouterClient(settings.openrouter_api_key, settings.summary_model, settings.embedding_model)
     app.state.github = github or GitHubClient(settings.github_token)
     app.state.hf = hf or HuggingFaceClient(settings.hf_token)

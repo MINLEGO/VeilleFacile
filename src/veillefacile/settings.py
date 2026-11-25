@@ -12,6 +12,8 @@ DEFAULT_SUMMARY_MODEL = (
 class Settings:
     api_key: str
     database_url: str
+    read_api_key: str = ""  # optional second key: GET (read) routes only, e.g. for a public page
+    cors_origins: str = ""  # comma-separated origins allowed to call /api from a browser (public page elsewhere)
     openrouter_api_key: str = ""
     github_token: str = ""
     hf_token: str = ""
@@ -33,6 +35,8 @@ class Settings:
         return cls(
             api_key=e["API_KEY"],
             database_url=e["DATABASE_URL"],
+            read_api_key=e.get("READ_API_KEY", ""),
+            cors_origins=e.get("CORS_ORIGINS", ""),
             openrouter_api_key=e.get("OPENROUTER_API_KEY", ""),
             github_token=e.get("GITHUB_TOKEN", ""),
             hf_token=e.get("HF_TOKEN", ""),
