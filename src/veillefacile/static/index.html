@@ -20,6 +20,7 @@
   #grid.hasbanner { height:calc(100vh - 31px); }
   #grid > div { overflow:auto; border-right:1px solid var(--line); padding:14px; }
   .side label { display:block; margin:10px 0 3px; font-size:12px; color:var(--muted); }
+  .sites { max-height:140px; overflow-y:auto; }
   .sites a { display:inline-block; margin:2px 4px 2px 0; padding:1px 8px; border-radius:999px; background:#eef1fb; color:var(--acc); cursor:pointer; font-size:12px; }
   .sites a.on { background:var(--acc); color:#fff; }
   .item { padding:10px; border-radius:8px; cursor:pointer; margin-bottom:4px; }
@@ -78,7 +79,7 @@
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const lc = s => s.toLowerCase();
-const state = { site: "", sel: null, tab: "summary", textStart: 0, editing: false, seen: new Set() };
+const state = { site: "", sel: null, tab: "summary", textStart: 0, editing: false, sites: [] };
 const SLICE = 5000;
 const store = { get: () => { try { return localStorage.getItem("vf_key") || ""; } catch { return ""; } },
                 set: v => { try { v ? localStorage.setItem("vf_key", v) : localStorage.removeItem("vf_key"); } catch {} } };
@@ -118,8 +119,6 @@ async function search() {
     const r = await api("/sources?" + p);
     $("banner").hidden = !r.degraded;
     $("grid").classList.toggle("hasbanner", !!r.degraded);
-    r.results.forEach(s => state.seen.add(s.origin_site));
-    renderSites();
     $("results").innerHTML = r.results.length ? r.results.map(s => `
       <div class="item ${s.id === state.sel ? "sel" : ""}" data-id="${s.id}">
         <div class="t">${esc(s.title)}</div>
@@ -129,8 +128,20 @@ async function search() {
   } catch (e) { $("results").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
 }
 
+// shortcut: counts only the 100 most recently updated Sources (API page max), so older sites can be missing or misordered; add a server-side count if that hurts.
+async function loadSites() {
+  const count = new Map();
+  try {
+    for (const s of (await api("/sources?limit=100")).results) count.set(s.origin_site, (count.get(s.origin_site) || 0) + 1);
+  } catch {}  // search() already shows API errors
+  state.sites = [...count.keys()].sort((a, b) => count.get(b) - count.get(a) || a.localeCompare(b));
+  renderSites();
+}
+
 function renderSites() {
-  $("sites").innerHTML = [...state.seen].sort().map(s =>
+  // the active filter stays listed even when not counted, so it can still be unselected
+  const sites = state.site && !state.sites.includes(state.site) ? [...state.sites, state.site] : state.sites;
+  $("sites").innerHTML = sites.map(s =>
     `<a data-site="${esc(s)}" class="${s === state.site ? "on" : ""}">${esc(s)}</a>`).join("") || "—";
 }
 
@@ -178,7 +189,7 @@ async function renderDetail() {
   $("titlebtn").onclick = () => { const t = prompt("Nouveau titre", s.title); if (t && t.trim()) patch({ title: t.trim() }); };
   $("del").onclick = async () => {
     if (!confirm(`Supprimer « ${s.title} » ? Cette action est irréversible.`)) return;
-    try { await api("/sources/" + s.id, { method: "DELETE" }); state.sel = null; renderDetail(); search(); }
+    try { await api("/sources/" + s.id, { method: "DELETE" }); state.sel = null; renderDetail(); search(); loadSites(); }
     catch (e) { $("derr").textContent = e.message; }
   };
   document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { state.tab = b.dataset.tab; state.textStart = 0; renderDetail(); });
@@ -199,16 +210,17 @@ $("sites").onclick = e => { const a = e.target.closest("a"); if (a) { state.site
 for (const id of ["q", "kw"]) $(id).onkeydown = e => { if (e.key === "Enter") search(); };  // each search may cost an embedding call
 $("mode").onchange = search;
 $("key").value = store.get();
-$("key").onchange = () => { store.set($("key").value.trim()); search(); };
-$("forget").onclick = () => { store.set(""); $("key").value = ""; };
+$("key").onchange = () => { store.set($("key").value.trim()); search(); loadSites(); };
+$("forget").onclick = () => { store.set(""); $("key").value = ""; loadSites(); };
 $("add").onclick = async () => {
   const url = $("url").value.trim(); if (!url) return;
   $("adderr").textContent = ""; $("addmsg").textContent = "Récupération en cours, patientez…"; $("add").disabled = true;
-  try { const s = await api("/sources", { method: "POST", body: JSON.stringify({ url }) }); $("url").value = ""; await search(); openSource(s.id); }
+  try { const s = await api("/sources", { method: "POST", body: JSON.stringify({ url }) }); $("url").value = ""; loadSites(); await search(); openSource(s.id); }
   catch (e) { $("adderr").textContent = e.message; }
   $("addmsg").textContent = ""; $("add").disabled = false;
 };
 search();
+loadSites();
 </script>
 </body>
 </html>
